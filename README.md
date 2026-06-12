@@ -7,7 +7,7 @@
 [![mini-swe-acp](https://github.com/benchflow-ai/agents/actions/workflows/test-mini-swe-acp.yaml/badge.svg)](https://github.com/benchflow-ai/agents/actions/workflows/test-mini-swe-acp.yaml)
 [![mini-swe-code](https://github.com/benchflow-ai/agents/actions/workflows/test-mini-swe-code.yaml/badge.svg)](https://github.com/benchflow-ai/agents/actions/workflows/test-mini-swe-code.yaml)
 [![lint](https://github.com/benchflow-ai/agents/actions/workflows/lint.yaml/badge.svg)](https://github.com/benchflow-ai/agents/actions/workflows/lint.yaml)
-[![License](https://img.shields.io/badge/license-Apache--2.0%20%2B%20MIT-blue)](#license)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](#license)
 
 [Play with it](#-play-with-it--mini-swe-code) ·
 [Benchmark with it](#-benchmark-with-it--mini-swe-acp) ·
