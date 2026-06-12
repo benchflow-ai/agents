@@ -1,0 +1,28 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      # Pinned to the same version as .pre-commit-config.yaml
+      - name: Install ruff
+        run: pip install ruff==0.15.15
+      - name: Lint mini-swe-acp
+        working-directory: mini-swe-acp
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+      - name: Lint mini-swe-code
+        working-directory: mini-swe-code
+        run: ruff check src tests

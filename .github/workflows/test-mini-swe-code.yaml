@@ -1,0 +1,46 @@
+name: mini-swe-code
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mini-swe-code/**'
+      - '.github/workflows/test-mini-swe-code.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mini-swe-code/**'
+      - '.github/workflows/test-mini-swe-code.yaml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+        working-directory: mini-swe-code
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install dependencies
+        run: uv pip install --python ${Python_ROOT_DIR} -e '.[dev,opencode]'
+      - name: Configure mini-swe-agent
+        run: mini-extra config set MSWEA_CONFIGURED 'true'
+      # Key-free subset (no provider API keys, no container runtimes); the
+      # full upstream suite needs OPENAI/OPENROUTER/REQUESTY secrets + podman,
+      # bubblewrap, apptainer.
+      - name: Run pytest
+        run: |
+          MSWEA_SILENT_STARTUP=1 pytest -q \
+            tests/models tests/agents tests/config tests/utils \
+            tests/run/test_batch_progress.py tests/run/test_inspector.py \
+            tests/run/test_run_hello_world.py tests/run/test_local.py \
+            tests/run/test_save.py

@@ -1,0 +1,41 @@
+[project]
+name = "mini-swe-acp"
+version = "0.1.0"
+description = "mini-swe-agent as a BenchFlow agent — ACP shim + registration"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+dependencies = [
+    # >=0.5.2: register.py needs the registry helpers (_apt_install, ...).
+    # benchflow pins litellm to an rc — uv users: --prerelease=allow.
+    "benchflow>=0.5.2",
+    "pyyaml>=6",
+]
+
+[project.urls]
+Repository = "https://github.com/benchflow-ai/agents"
+Documentation = "https://github.com/benchflow-ai/agents/tree/main/mini-swe-acp#readme"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.15",
+    "ty",
+    "mini-swe-agent",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mini_swe_acp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+src = ["src", "tests"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mini_swe_acp"]
