@@ -7,7 +7,29 @@ is no eval-only reimplementation (that's the [eval↔prod-gap](../README.md) poi
 
 Worked examples: [`ai-sdk/acp`](../ai-sdk/acp) (AI SDK `ToolLoopAgent`),
 [`ai-sdk/harness-pi`](../ai-sdk/harness-pi) (AI SDK 7 `HarnessAgent`),
-[`mini-swe-acp`](../mini-swe-acp) (a Python harness shim).
+[`mini-swe-acp`](../mini-swe-acp) (a Python harness shim), and
+[`acp-registry`](../acp-registry) (agents that already speak ACP — no server to
+write, just install + launch + route).
+
+## When the agent already speaks ACP
+
+Most agents in the [ACP registry](https://agentclientprotocol.com/get-started/registry)
+*are* ACP servers already, so there's no `server.mjs` to write — adapting one is
+just the `register.py` half: an install command (npm/binary/uvx) and a launch
+command, plus the `env_mapping` that routes its model through the gateway.
+[`acp-registry`](../acp-registry) does this registry-wide, and its
+[catalog](../acp-registry/AGENTS.md) is also a map of *which* third-party agents
+can route through a gateway at all (many coding-vendor CLIs are locked to their
+own backend and can't). Two gotchas it surfaces, worth knowing before you wire
+any ACP agent:
+- **Model selection is capability-first.** If the agent advertises a `model`
+  session config option, BenchFlow drives the model through it (not
+  `session/set_model`, not env) — so the agent must accept the model id
+  BenchFlow sends. An agent that validates model ids against its own list may
+  reject a gateway alias; verify before claiming it's wired.
+- **Vendor lock-in is the common case.** Routing through BenchFlow's gateway
+  needs an arbitrary base URL *and* arbitrary model. Agents tied to their
+  vendor's backend can run, but can't be a faithful model-enforced eval.
 
 ## Two files
 

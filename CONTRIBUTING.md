@@ -1,12 +1,14 @@
 # Contributing
 
 Thanks for your interest! This is a small monorepo of agent packages —
-`mini-swe-acp`, `mini-swe-code`, and the `ai-sdk/` group (`acp`, `harness-pi`,
-`harness-codex`, `harness-claude-code`) — each builds, tests, and ships on its
-own. The `ai-sdk/*` packages pair a pure-JS ACP server (`server.mjs`) with a
-small Python `register.py` that wires the agent into BenchFlow. New agents:
-scaffold + parity-check with the [`adaptation-parity`](skills/adaptation-parity)
-skill (`docs/adaptation.md`, `docs/parity.md`).
+`mini-swe-acp`, `mini-swe-code`, the `ai-sdk/` group (`acp`, `harness-pi`,
+`harness-codex`, `harness-claude-code`), and `acp-registry` — each builds, tests,
+and ships on its own. The `ai-sdk/*` packages pair a pure-JS ACP server
+(`server.mjs`) with a small Python `register.py` that wires the agent into
+BenchFlow; `acp-registry` adapts agents that already speak ACP (the public ACP
+registry) via a registry-driven catalog + `register.py`. New agents: scaffold +
+parity-check with the [`adaptation-parity`](skills/adaptation-parity) skill
+(`docs/adaptation.md`, `docs/parity.md`).
 
 ## Dev setup
 
@@ -54,6 +56,23 @@ node --check src/*/server.mjs                    # JS server syntax
 The JS `server.mjs` is base64-deployed into the benchflow sandbox by
 `register.py`'s install command (its npm deps are installed there). Running it
 against a live benchmark needs Node, a sandbox (docker/daytona), and a model.
+
+### acp-registry (Python ≥3.12)
+
+```bash
+cd acp-registry
+uv venv .venv && source .venv/bin/activate
+uv pip install --prerelease=allow -e ".[dev]"   # benchflow pins an rc litellm
+pytest -q                                        # key-free; no sandbox/model needed
+ruff check src tests scripts
+python scripts/gen_agents_md.py > AGENTS.md      # regenerate the catalog table
+```
+
+The catalog (`src/acp_registry/catalog.py`) is the single source of truth;
+`AGENTS.md` is generated from it (CI fails if they drift). When the upstream ACP
+registry changes, `scripts/refresh_registry.py` diffs it against the vendored
+snapshot so you know what to reclassify. There's no `server.mjs` here — these
+agents already speak ACP; `register.py` only installs + launches them.
 
 ## CI
 
