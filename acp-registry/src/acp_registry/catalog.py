@@ -98,23 +98,26 @@ class AcpAgent:
         if self.status == NATIVE and not self.native_name:
             raise ValueError(f"{self.registry_id}: native entry needs native_name")
         if self.status == WIRED:
-            if self.distribution != NPX:
-                # This pass only wires npx agents (reuses BenchFlow's proven
-                # _js_agent_install). uvx/binary wiring is future work.
-                raise ValueError(f"{self.registry_id}: wired entries must be npx")
-            if not self.bin_name:
-                raise ValueError(f"{self.registry_id}: wired entry needs bin_name")
+            if self.distribution not in {NPX, BINARY}:
+                # npx (reuses BenchFlow's _js_agent_install) and binary (per-arch
+                # download from the registry snapshot) are wired today; uvx is not.
+                raise ValueError(
+                    f"{self.registry_id}: wired entries must be npx or binary"
+                )
             if not self.env_mapping:
                 raise ValueError(f"{self.registry_id}: wired entry needs env_mapping")
-            if self.launch_env:
-                # register.py launches wired agents with a plain command; constant
-                # launch env isn't supported there yet (it would need to go through
-                # register_agent's contract, not a fragile shell prefix). Keep
-                # launch_env to catalog-tier recipes until a wired agent needs it.
-                raise ValueError(
-                    f"{self.registry_id}: launch_env on a wired entry is not "
-                    "supported yet — wire it through register_agent, not a prefix"
-                )
+            if self.distribution == NPX:
+                if not self.bin_name:
+                    raise ValueError(f"{self.registry_id}: npx wired needs bin_name")
+                if self.launch_env:
+                    # _js_agent_launch returns a wrapper path that may not tolerate a
+                    # `KEY=val ` prefix; npx wired agents take their config via
+                    # env_mapping only. Binary launches (a clean `cd dir && env ./bin`)
+                    # can carry launch_env safely.
+                    raise ValueError(
+                        f"{self.registry_id}: launch_env unsupported on npx wired "
+                        "(use a binary launch or env_mapping)"
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -245,19 +248,38 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="acp",
-        status=CATALOG,
+        bin_name="goose",
+        status=WIRED,
         summary="Block's general agent; broad provider support incl. any "
-        "OpenAI-compatible host.",
+        "OpenAI-compatible host. Verified running in BenchFlow.",
         api_protocol="openai-completions",
         env_mapping={
             "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
             "BENCHFLOW_PROVIDER_MODEL": "GOOSE_MODEL",
         },
+        launch_env={
+            "GOOSE_PROVIDER": "openai",
+            # goose's openai provider takes a host + base path (not one URL); the
+            # gateway/provider base URL is the host, the OpenAI path is constant.
+            "OPENAI_HOST": "$BENCHFLOW_PROVIDER_BASE_URL",
+            "OPENAI_BASE_PATH": "v1/chat/completions",
+        },
         model_via="env",
-        reason="BYO via OPENAI_HOST + OPENAI_BASE_PATH (or a custom_providers "
-        "JSON with base_url), GOOSE_PROVIDER=openai, GOOSE_MODEL. Needs a binary "
-        "installer (Linux x86_64 + aarch64 releases exist) and a base-URL split "
-        "into host+path, so not in this npx-only first pass.",
+        verified=(
+            "hello-world (reward 1.0)",
+            "skillsbench/citation-check (ran end-to-end, no error; reward 0.0 "
+            "— agent didn't solve it with deepseek-v4-flash, not an integration "
+            "failure)",
+        ),
+        known_issue="OPENAI_HOST is set to the provider base URL and OPENAI_BASE_PATH "
+        "to a constant v1/chat/completions — correct for a host-only base URL "
+        "(DeepSeek, the LiteLLM gateway). A provider whose base URL already carries "
+        "a path would double it up; such providers need the custom_providers JSON "
+        "instead.",
+        reason="Per-arch Linux binary (x86_64 + aarch64) downloaded from the "
+        "registry snapshot; all-env wiring (GOOSE_PROVIDER=openai, OPENAI_HOST/"
+        "OPENAI_BASE_PATH, OPENAI_API_KEY, GOOSE_MODEL) — no config file. Verified "
+        "end-to-end on DeepSeek via Daytona.",
         source="https://block.github.io/goose/docs/getting-started/providers",
     ),
     AcpAgent(
@@ -288,7 +310,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         repository="https://github.com/vinhnx/VTCode",
         distribution=BINARY,
         package="",
-        acp_args="",
+        acp_args="acp",
         status=CATALOG,
         summary="Rust coding agent; [[custom_providers]] with arbitrary base_url.",
         api_protocol="openai-completions",
@@ -316,7 +338,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
     AcpAgent(
         registry_id="kimi",
         name="Kimi CLI",
-        license="MIT",
+        license="Apache-2.0",
         repository="https://github.com/MoonshotAI/kimi-cli",
         distribution=BINARY,
         package="",
@@ -354,17 +376,19 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         name="Kilo",
         license="MIT",
         repository="https://github.com/Kilo-Org/kilocode",
-        distribution=BINARY,
-        package="",
+        distribution=NPX,
+        package="@kilocode/cli",
         acp_args="acp",
         status=CATALOG,
         summary="Kilo Code CLI (OpenCode-based); @ai-sdk/openai-compatible "
         "adapter with arbitrary baseURL.",
         api_protocol="openai-completions",
+        bin_name="kilo",
         model_via="config-file",
         reason="BYO via config file provider.<id>.options.baseURL + top-level "
-        "model ({env:VAR} substitution; KILO_API_KEY env). No documented "
-        "env-only base URL — needs a config-file writer.",
+        "model ({env:VAR} substitution; KILO_API_KEY env). npx-distributed "
+        "(@kilocode/cli), but still needs a config-file writer (no env-only base "
+        "URL), so not wired in this first pass.",
         source="https://kilo.ai/docs/code-with-ai/platforms/cli",
     ),
     AcpAgent(
@@ -385,10 +409,14 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         },
         bin_name="dirac",
         model_via="flag",
-        reason="npx, pure-JS — close to wireable. Held back to verify two "
-        "details first: it reads OPENAI_API_BASE (not OPENAI_BASE_URL), and the "
-        "model is a launch flag (--model) rather than an env var, so the launch "
-        "command must interpolate $BENCHFLOW_PROVIDER_MODEL.",
+        known_issue="PROBED on DeepSeek/Daytona: dirac DOES speak ACP (the "
+        "registry's `--acp` is correct; an earlier README-only audit that claimed "
+        "'no ACP' was wrong), and it got into the loop (1 tool call) — but the "
+        "process then closed its stdout mid-run (benchflow `pipe_closed`), so the "
+        "task didn't complete. Needs debugging (likely a dirac-side exit) before "
+        "it can be wired.",
+        reason="npx, pure-JS, reads OPENAI_API_BASE (not OPENAI_BASE_URL), model "
+        "via --model flag. ACP confirmed; held back on the mid-run stdout close.",
         source="https://github.com/dirac-run/dirac",
     ),
     AcpAgent(
@@ -426,14 +454,17 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         "overrides. A good 'not just coding' agent.",
         api_protocol="openai-completions",
         env_mapping={
-            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL",
-            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+            # fast-agent does NOT read a plain OPENAI_BASE_URL; base_url is the
+            # pydantic-settings nested form OPENAI__BASE_URL (or fastagent.config.yaml).
+            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI__BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI__API_KEY",
         },
         model_via="flag",
-        reason="BYO via OPENAI_BASE_URL/ANTHROPIC_BASE_URL (config or OPENAI__ "
-        "nested env) + --model. uvx-distributed, so it needs a uv bootstrap "
-        "this npx-only first pass doesn't ship.",
-        source="https://fast-agent.ai/acp/",
+        reason="BYO via OPENAI__BASE_URL / OPENAI__API_KEY (pydantic nested env, "
+        "NOT plain OPENAI_BASE_URL) or fastagent.config.yaml, + --model. "
+        "uvx-distributed, so it needs a uv bootstrap this npx-only first pass "
+        "doesn't ship.",
+        source="https://fast-agent.ai/ref/config_file/",
     ),
     AcpAgent(
         registry_id="autohand",
@@ -455,7 +486,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
     AcpAgent(
         registry_id="nova",
         name="Nova",
-        license="proprietary",
+        license="MIT",
         repository="https://github.com/Compass-Agentic-Platform/nova",
         distribution=NPX,
         package="@compass-ai/nova",
@@ -515,11 +546,15 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         launch_env={"COPILOT_PROVIDER_TYPE": "openai"},
         bin_name="copilot",
         model_via="env",
+        known_issue="PROBED on DeepSeek/Daytona with @github/copilot@1.0.61 + "
+        "COPILOT_PROVIDER_TYPE=openai + COPILOT_PROVIDER_BASE_URL/_API_KEY/"
+        "COPILOT_MODEL: session/new still fails with ACP -32000 'Authentication "
+        "required' — BYOK is NOT honored in ACP mode on this version (the npm "
+        "package also runtime-fetches a platform binary). Not usable until "
+        "BYOK-in-ACP works; revisit on a newer release.",
         reason="BYO via COPILOT_PROVIDER_BASE_URL/_TYPE/_API_KEY + COPILOT_MODEL "
-        "(all env — would be wireable). Held back for two reasons: the npm "
-        "package is an npm-loader that fetches a platform binary at runtime (the "
-        "_js_agent_install `node <bin>` wrapper may not apply), and BYOK-in-ACP "
-        "was broken <=1.0.60 (fixed ~1.0.61) — must pin + smoke-test session/new.",
+        "(all env), and BYOK is GA — but the ACP path still demands GitHub auth "
+        "(see known_issue).",
         source="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models",
     ),
     AcpAgent(
@@ -552,11 +587,13 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         summary="BYO agent ('OpenAI, Anthropic, or custom endpoint'; bring your "
         "own model).",
         model_via="config-file",
-        reason="BYO via `dim provider add --base-url --api-key --model` "
-        "(~/.dimcode/v2/providers.json) — no LLM-routing env vars, so it needs a "
-        "config-file writer. Per-provider wire protocol undocumented (binary is "
-        "minified/closed).",
-        source="https://dim.qwenkimi.com/docs/",
+        reason="BYO but configured INTERACTIVELY (run `dim`, then `/connect`), "
+        "persisted to ~/.dimcode/v2/dimcode.sqlite + credentials/ — there is no "
+        "`dim provider add` CLI and no providers.json, so non-interactive wiring "
+        "would have to seed a sqlite db. ACP launch is `dim acp`. Effectively not "
+        "cleanly wireable headless; per-provider wire protocol undocumented "
+        "(binary minified/closed).",
+        source="https://dim.qwenkimi.com/docs/acp",
     ),
     AcpAgent(
         registry_id="grok-build",
@@ -584,7 +621,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         repository="https://github.com/JetBrains/junie",
         distribution=BINARY,
         package="",
-        acp_args="",
+        acp_args="--acp true",
         status=CATALOG,
         summary="JetBrains Junie CLI; 'the LLM-agnostic coding agent' — "
         "custom-model JSON profiles with arbitrary baseUrl.",
@@ -607,9 +644,10 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         summary="Poolside 'pool' CLI; connects to any OpenAI-compatible chat "
         "completions API (incl. LiteLLM, OpenRouter, Ollama).",
         api_protocol="openai-completions",
-        model_via="env",
-        reason="BYO via POOLSIDE_API_URL / --api-url + --model. Needs a binary "
-        "(shell-installer) path; CLI binary is proprietary.",
+        model_via="flag",
+        reason="BYO via the `--api-url` flag (arbitrary OpenAI-compatible URL) + "
+        "--model — NOT a POOLSIDE_API_URL env var. Needs a binary (shell-installer) "
+        "path; CLI binary is proprietary.",
         source="https://docs.poolside.ai",
     ),
     AcpAgent(

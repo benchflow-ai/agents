@@ -91,16 +91,55 @@ This package enables it via feature-detection; on a BenchFlow build without it,
 
 With that flag, qwen-code runs natively:
 
-| Task | Sandbox | Model | Result |
-|---|---|---|---|
-| `hello-world` (toy sanity) | Daytona | `deepseek/deepseek-v4-flash` | ✅ **reward 1.0** — 1 tool call, file written, verifier passed |
-| `skillsbench/citation-check` (real) | Daytona | `deepseek/deepseek-v4-flash` | ✅ **reward 1.0** — 33 tool calls, 68 steps, no errors |
+| Task | Routing | Result |
+|---|---|---|
+| `hello-world` (toy sanity) | direct DeepSeek | ✅ **reward 1.0** — 1 tool call, file written, verifier passed |
+| `skillsbench/citation-check` (real) | direct DeepSeek | ✅ **reward 1.0** — 33 tool calls, 68 steps, no errors |
+| `hello-world` | **LiteLLM gateway** (`usage=auto`) | ✅ **reward 1.0** — usage captured: `usage_source=provider_response`, 45,097 in / 116 out tokens (the alias rides `OPENAI_MODEL` through the gateway) |
 
 The real task matters: `citation-check` ships an input file (`/root/test.bib`) and
 a skill, and needs the agent to verify citations (web lookups, 33 tool calls) and
 write `/root/answer.json`. It's the **same task `ai-sdk/harness-pi` couldn't do**
 (its just-bash sandbox hides task files); qwen-code runs in a real Daytona sandbox,
 so it sees the file and solves it. Full trajectory is in the PR comments.
+
+### [goose](https://github.com/block/goose) (`goose`)
+
+Block's general agent, distributed as a **per-arch Linux binary** (downloaded from
+the registry snapshot, no npm). Wired with all-env routing — `GOOSE_PROVIDER=openai`,
+`OPENAI_HOST`/`OPENAI_BASE_PATH` (the gateway/provider base URL + the OpenAI path),
+`OPENAI_API_KEY`, `GOOSE_MODEL` — no config file. Verified through the **shipped
+package** (`acp_registry.register()` → its own binary install + launch):
+
+| Task | Sandbox | Model | Result |
+|---|---|---|---|
+| `hello-world` | Daytona | `deepseek/deepseek-v4-flash` | ✅ **reward 1.0** — ran, file written |
+| `skillsbench/citation-check` | Daytona | `deepseek/deepseek-v4-flash` | ✅ ran end-to-end, no error — **reward 0.0** (the agent didn't solve it with this model; an *agent/model* outcome, **not** an integration failure) |
+
+That distinction is the honest one: goose's **integration** is verified (install →
+launch → route → execute → file access all work); whether it *solves* a hard task
+is the agent+model's business. `OPENAI_HOST`+`OPENAI_BASE_PATH` assume a host-only
+base URL (true for DeepSeek and the gateway) — see its `known_issue`.
+
+## Live verification (truth table)
+
+Every wired agent was run on Daytona/DeepSeek; several catalog candidates were also
+probed live. Honest results:
+
+| Agent | Dist | Live result |
+|---|---|---|
+| `qwen-code` | npx | ✅ **wired+verified** — reward 1.0 hello-world & real citation-check; gateway usage captured |
+| `goose` | binary | ✅ **wired+verified-runs** — reward 1.0 hello-world; real task ran clean (reward 0.0, agent didn't solve) |
+| `dirac` | npx | ⚠️ probed — **speaks ACP** (registry's `--acp` correct), entered the loop, but closed stdout mid-run (`pipe_closed`); not yet wireable |
+| `github-copilot-cli` | npx | ❌ probed — `-32000 Authentication required` on `@github/copilot@1.0.61`; BYOK not honored in ACP mode |
+
+The other catalog agents (config-file: `stakpak`/`vtcode`/`crow-cli`/`kimi`/
+`mistral-vibe`/`kilo`/`autohand`/`codebuddy`/`cline`; uvx: `fast-agent`/`minion-code`;
+proprietary-gated install: `junie`/`poolside`/`grok-build`; colon-model: `deepagents`;
+interactive-config: `dimcode`) are **not yet probed** — each needs a config-file
+writer / uvx bootstrap / install path before a fair run. Their recipes are in
+[AGENTS.md](AGENTS.md). Vendor-locked agents (9) and the marketplace entry can't run
+as model-enforced evals at all.
 
 ## Adding more agents
 

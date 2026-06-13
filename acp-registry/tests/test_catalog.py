@@ -13,6 +13,7 @@ from benchflow.agents.registry import AGENTS
 
 from acp_registry import ACP_AGENTS, BY_ID, NATIVE, WIRED, by_status
 from acp_registry.catalog import (
+    BINARY,
     CATALOG,
     NPX,
     OUT_OF_SCOPE,
@@ -57,7 +58,7 @@ def test_native_pointers_resolve_to_builtins() -> None:
 
 def test_wired_entries_are_routable_by_construction() -> None:
     for agent in by_status(WIRED):
-        assert agent.distribution == NPX
+        assert agent.distribution in {NPX, BINARY}
         assert agent.bin_name
         assert agent.api_protocol
         assert agent.env_mapping, "wired agent must map a provider base URL/key"
@@ -72,13 +73,14 @@ def test_wired_entries_are_routable_by_construction() -> None:
             assert "BENCHFLOW_PROVIDER_MODEL" in agent.env_mapping
 
 
-def test_wired_entries_have_no_launch_env() -> None:
-    """register.py launches wired agents with a plain command (no env prefix)."""
+def test_npx_wired_entries_have_no_launch_env() -> None:
+    """npx wired agents launch via _js_agent_launch, which can't carry an env
+    prefix; only binary wired agents (clean `cd dir && env ./bin`) may."""
     for agent in by_status(WIRED):
-        assert not agent.launch_env, (
-            f"{agent.registry_id}: wired agents can't carry launch_env yet "
-            "(see register._launch_cmd)"
-        )
+        if agent.distribution == NPX:
+            assert not agent.launch_env, (
+                f"{agent.registry_id}: launch_env unsupported on npx wired"
+            )
 
 
 def test_wired_and_catalog_do_not_shadow_builtins() -> None:

@@ -41,7 +41,7 @@ you want to both ship and benchmark.
 |---|---|---|
 | [**mini-swe**](mini-swe-code/) | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) behind opencode's TUI ([mini-swe-code](mini-swe-code/)) + an ACP shim ([mini-swe-acp](mini-swe-acp/)) | ✅ stable — faithful SWE-agent harness (>74% SWE-bench verified) |
 | [**ai-sdk**](ai-sdk/) | the Vercel AI SDK agent surface — `ToolLoopAgent` ([acp](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/)} | mixed — `acp` ✅ (parity byte-verified), `harness-pi` ✅ (file tasks), `codex`/`claude-code` 🧪 (need a Vercel sandbox). Per-agent maturity in [ai-sdk/README](ai-sdk/README.md). |
-| [**acp-registry**](acp-registry/) | the [ACP registry](https://agentclientprotocol.com/get-started/registry) — every agent there speaks ACP, so it's a natural source to benchmark. Qwen Code is wired; all 36 are classified | mixed — `qwen-code` ✅ wired (OpenAI-compatible env routing); 20 more BYO-redirectable with exact recipes; 9 vendor-locked; 5 already native. Full map in [acp-registry/AGENTS.md](acp-registry/AGENTS.md). |
+| [**acp-registry**](acp-registry/) | the [ACP registry](https://agentclientprotocol.com/get-started/registry) — every agent there speaks ACP, so it's a natural source to benchmark. Qwen Code + goose wired; all 36 classified | mixed — `qwen-code` ✅ & `goose` ✅ wired + live-verified on DeepSeek/Daytona; 19 more BYO-redirectable with recipes; 9 vendor-locked; 5 native. Live truth table + full map in [acp-registry/AGENTS.md](acp-registry/AGENTS.md) and the package README. |
 
 Each agent is a self-contained package: a production runtime + a thin ACP adapter
 registered via the public `register_agent` extension point.

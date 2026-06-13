@@ -18,7 +18,7 @@ def test_register_returns_wired_ids() -> None:
 
 def test_register_subset_rejects_non_wired() -> None:
     with pytest.raises(KeyError):
-        register("goose")  # catalog, not wired
+        register("stakpak")  # catalog, not wired
 
 
 @pytest.mark.parametrize(
@@ -38,14 +38,19 @@ def test_wired_agent_wires_gateway_routing_contract(spec) -> None:
 @pytest.mark.parametrize(
     "spec", wired_agents(), ids=lambda s: s.registry_id
 )
-def test_install_cmd_bootstraps_node_and_pins_package(spec) -> None:
+def test_install_cmd_installs_and_verifies(spec) -> None:
     cmd = _install_cmd(spec)
-    # Reuses BenchFlow's isolated Node bootstrap + npm-global install.
-    assert "BF_NODE_VERSION" in cmd or "node" in cmd
-    assert spec.package in cmd
-    # Install is verified (the helper ends with an existence check), not
-    # best-effort.
+    if spec.distribution == "npx":
+        # Reuses BenchFlow's isolated Node bootstrap + npm-global install.
+        assert "BF_NODE_VERSION" in cmd or "node" in cmd
+        assert spec.package in cmd
+    else:  # binary
+        # Per-arch download from the vendored snapshot URL.
+        assert "curl" in cmd and "uname -m" in cmd
+        assert "https://" in cmd
+    # Install ends with an existence check on the installed binary, not best-effort.
     assert spec.bin_name in cmd
+    assert "[ -x" in cmd or "[ -d" in cmd or "[ -f" in cmd
 
 
 @pytest.mark.parametrize(
