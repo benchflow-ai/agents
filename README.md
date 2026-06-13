@@ -2,7 +2,7 @@
 
 # BenchFlow Agents
 
-**Coding agents that run the same in evaluation and in production — closing the gap between the two.**
+**Agents that run the same in evaluation and in production — closing the gap between the two.**
 
 [![lint](https://github.com/benchflow-ai/agents/actions/workflows/lint.yaml/badge.svg)](https://github.com/benchflow-ai/agents/actions/workflows/lint.yaml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](#license)
@@ -29,6 +29,11 @@ here runs in production (an interactive TUI, the Vercel AI SDK, a coding CLI)
 *and* as an evaluation harness on [BenchFlow](https://github.com/benchflow-ai/benchflow)
 over [ACP](https://agentclientprotocol.com) — with no reimplementation. What you
 benchmark is what you ship. That's the gap we're closing.
+
+And not just *coding* agents: mini-swe is a coding harness, but the Vercel AI SDK
+agents are general, tool-using agent frameworks (build any agent), and BenchFlow
+evaluations span well beyond code. The repo is a home for agents of any kind that
+you want to both ship and benchmark.
 
 ## Agents
 
