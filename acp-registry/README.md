@@ -134,15 +134,15 @@ blocker:
 | `qwen-code` | npx | ✅ **verified** — reward 1.0 hello-world & real citation-check; gateway usage captured |
 | `goose` | binary | ✅ **verified-runs** — reward 1.0 hello-world; real task ran clean (reward 0.0 — agent didn't solve, not an integration failure) |
 | `deepagents` | npx | ✅ **verified-runs** — reward 1.0 hello-world (fix: install `@langchain/openai` alongside + `--model openai:<m>`); real task ran ~10 tools then an in-run `-32603` |
-| `vtcode` | binary | ⚠️ fix applied (`[agent] provider` + `api_key_env` + `/v1`), still exits at launch (`rc=127`) — closest config-file binary |
-| `dirac` | npx | ⚠️ speaks ACP, enters loop, exits mid-run (`rc=255`) |
-| `kilo` | npx | ⚠️ install `rc=1` after fix |
-| `codebuddy-code` | npx | ⚠️ `pipe_closed` at ACP launch |
-| `crow-cli` | uvx | ⚠️ Python 3.14 + `uvx` + a `crow-mcp` subprocess; `pipe_closed` |
-| `mistral-vibe` | binary | ⚠️ install `rc=1` (zip/runtime) |
-| `minion-code` | uvx | ⚠️ `rc=127` (uvx launch) |
-| `junie` | binary | ⚠️ `rc=127` (JetBrains; needs a JVM/runtime) |
-| `cline` | npx | ❌ `-32000` — needs a separate `cline auth` step first (+ known base-URL routing bugs) |
+| `kilo` | npx | ⚠️ **probe-green** (reward 1.0 hello-world with an *install-time* config) — but the package's generic *launch-time* config-write regressed (`pipe_closed`); closest to wireable |
+| `vtcode` | binary | ⚠️ round-2 fixed the loader (`ldconfig` for the bundled `libghostty-vt.so`) + the missing key mapping; now gets further, exits `rc=255` at provider/config init |
+| `cline` | npx | ⚠️ round-2 `cline auth` prelude cleared the `-32000` — it now **runs** but timed out at 600s with 0 tools |
+| `dirac` | npx | ⚠️ speaks ACP, enters loop, exits mid-run |
+| `codebuddy-code` | npx | ⚠️ reaches ACP, then `-32603` |
+| `crow-cli` | uvx | ⚠️ Python 3.14 + `uvx` + a `crow-mcp` subprocess; exits `rc=255` |
+| `mistral-vibe` | binary | ⚠️ `pipe_closed` / install-runtime issues |
+| `minion-code` | uvx | ⚠️ `rc=2` at launch |
+| `junie` | binary | ⚠️ `rc=127` (JetBrains; needs a JVM) |
 | `dimcode` | npx | ❌ `-32000` — provider creds are interactive-only (`/connect`, sqlite); not headless |
 | `github-copilot-cli` | npx | ❌ `-32000` — BYOK not honored in ACP mode on `@github/copilot@1.0.61` |
 | `grok-build` | binary | ❌ install `rc=1` — xAI-gated download (SuperGrok) |
@@ -152,10 +152,14 @@ blocker:
 | `poolside` | binary | ❌ research hard-block — not headless-wirable to a custom endpoint over ACP |
 
 ⚠️ = installs + launches but the ACP session fails (a bounded per-agent fix: exact
-config schema, base-URL suffix, or runtime dep). ❌ = a real blocker (auth gate,
-interactive-only config, gated install, or upstream defect). The pipeline
-(`spec-extraction → probe-gen → live-verify`) is reusable, so each ⚠️ is now a
-known, bounded task rather than open research.
+config schema, base-URL suffix, runtime dep, or — for `kilo` — moving the
+config-write to install time). ❌ = a real blocker (auth gate, interactive-only
+config, gated install, or upstream defect). **Two fix rounds** (subagent fan-outs
+that root-caused each failure from rollout artifacts + upstream source) turned
+`deepagents` green and pushed several others much closer (`kilo` probe-green,
+`cline` now runs, `vtcode`'s loader fixed). The pipeline
+(`spec-extraction → probe-gen → live-verify → fix`) is reusable, so each remaining
+⚠️ is a known, bounded task rather than open research.
 
 Vendor-locked agents (9) + the marketplace entry can't run as model-enforced evals
 at all; the 5 native agents already ship in BenchFlow.

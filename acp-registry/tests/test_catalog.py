@@ -77,8 +77,8 @@ def test_wired_entries_are_routable_by_construction() -> None:
 
 
 def test_npx_wired_entries_have_no_launch_env() -> None:
-    """npx wired agents launch via _js_agent_launch, which can't carry an env
-    prefix; only binary wired agents (clean `cd dir && env ./bin`) may."""
+    """npx wired agents launch via _js_agent_launch (no env prefix); only binary
+    wired agents (clean `cd dir && env ./bin`) carry launch_env."""
     for agent in by_status(WIRED):
         if agent.distribution == NPX:
             assert not agent.launch_env, (

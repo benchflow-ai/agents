@@ -115,8 +115,8 @@ def _launch_cmd(spec: AcpAgent) -> str:
         dest = f"{_BIN_PREFIX}/{spec.registry_id}"
         cmd = f"cd {dest} && {_launch_env_prefix(spec)}./{spec.bin_name}"
         return f"{cmd} {spec.acp_args}".rstrip()
-    # npx: launch through BenchFlow's isolated JS wrapper (no env prefix — the
-    # catalog invariant forbids launch_env on npx wired agents).
+    # npx: launch through BenchFlow's isolated JS wrapper (no env prefix — npx
+    # wired agents take config via env_mapping; binary launches carry launch_env).
     return _js_agent_launch(spec.bin_name, spec.acp_args)
 
 

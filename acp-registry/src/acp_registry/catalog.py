@@ -108,18 +108,8 @@ class AcpAgent:
                 )
             if not self.env_mapping:
                 raise ValueError(f"{self.registry_id}: wired entry needs env_mapping")
-            if self.distribution == NPX:
-                if not self.bin_name:
-                    raise ValueError(f"{self.registry_id}: npx wired needs bin_name")
-                if self.launch_env:
-                    # _js_agent_launch returns a wrapper path that may not tolerate a
-                    # `KEY=val ` prefix; npx wired agents take their config via
-                    # env_mapping only. Binary launches (a clean `cd dir && env ./bin`)
-                    # can carry launch_env safely.
-                    raise ValueError(
-                        f"{self.registry_id}: launch_env unsupported on npx wired "
-                        "(use a binary launch or env_mapping)"
-                    )
+            if self.distribution == NPX and not self.bin_name:
+                raise ValueError(f"{self.registry_id}: npx wired needs bin_name")
 
 
 # ---------------------------------------------------------------------------
@@ -392,17 +382,24 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         repository="https://github.com/Kilo-Org/kilocode",
         distribution=NPX,
         package="@kilocode/cli",
-        acp_args="acp",
+        acp_args="acp --log-level ERROR --print-logs",
         status=CATALOG,
-        summary="Kilo Code CLI (OpenCode-based); @ai-sdk/openai-compatible "
-        "adapter with arbitrary baseURL.",
+        summary="Kilo Code CLI (OpenCode-based); a kilo.jsonc declares an "
+        "@ai-sdk/openai-compatible provider.",
         api_protocol="openai-completions",
         bin_name="kilo",
         model_via="config-file",
-        reason="BYO via config file provider.<id>.options.baseURL + top-level "
-        "model ({env:VAR} substitution; KILO_API_KEY env). npx-distributed "
-        "(@kilocode/cli), but still needs a config-file writer (no env-only base "
-        "URL), so not wired in this first pass.",
+        known_issue="PROBED green (reward 1.0 hello-world) when its kilo.jsonc was "
+        "written at INSTALL time with the model baked in. The package's generic "
+        "LAUNCH-time config-write (`python3 -c … && kilo acp`) regressed to "
+        "pipe_closed — benchflow's launch context doesn't run the config-write "
+        "reliably, and kilo's model id can't ride its `{env:}` substitution (it's a "
+        "config KEY, not an option value). Wiring it generically needs an "
+        "install-time config-writer that templates the benchmark model — deferred.",
+        reason="npx (@kilocode/cli). kilo.jsonc declares a `deepseek` "
+        "@ai-sdk/openai-compatible provider (baseURL + {env:…} key). Works with an "
+        "install-time written config; the generic launch-time writer needs work "
+        "(see known_issue).",
         source="https://kilo.ai/docs/code-with-ai/platforms/cli",
     ),
     AcpAgent(
