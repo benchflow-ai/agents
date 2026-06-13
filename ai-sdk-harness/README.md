@@ -60,18 +60,24 @@ async def main():
 asyncio.run(main())
 ```
 
-## Verified
+## Status — what it does and doesn't run
 
 On Daytona with DeepSeek (`deepseek-v4-flash`):
 
-| Task | reward | tool calls | usage |
-|---|---|---|---|
-| hello-world (relative path) | 1.0 | 2 (`write`, `fileChange`) | `agent_native_acp` |
-| terminal-bench-smoke (exec script + nested file, absolute `/app` paths) | 1.0 | 15 (`ls`, `write`, `bash`×13) | `agent_native_acp` |
+| Task | result |
+|---|---|
+| hello-world (self-contained file write) | ✅ reward 1.0; `agent_native_acp` usage; inside==outside behavior parity |
+| **real SkillsBench task** (e.g. `citation-check`: read an input file → reason → write JSON) | ❌ does not complete |
 
-Inside-vs-outside parity: identical tool-use + file output + `end_turn` (token
-counts vary only within model sampling non-determinism) — benchflow does not
-perturb the harness.
+On `citation-check` the agent **could not see the task's input file**
+(`/root/test.bib`) — just-bash's sandbox filesystem is isolated from where
+benchflow's task environment places files — and a run also hit a transient Node
+`ERR_INTERNAL_ASSERTION` (canary instability). So this package currently
+demonstrates the AI SDK 7 `HarnessAgent` **wiring** in benchflow (it installs,
+runs, streams, captures usage natively, and the session-dir↔task-cwd bridge
+works for self-contained file tasks) — it is **not yet a working harness for
+real eval workloads**. Real coverage requires solving just-bash's FS isolation
+and command limits (see Caveats), then running many task variants end-to-end.
 
 ## Caveats
 
@@ -80,6 +86,9 @@ perturb the harness.
   The model call is in-process (unaffected), but in-sandbox `pip`/`pytest`/real
   binaries are likely unsupported — file/shell tasks work; heavyweight
   repo+pytest workloads may hit just-bash's command limits.
+- **Input files placed by the task environment** (outside the bridged cwd) are
+  not visible to just-bash's isolated FS — tasks that ship input files (most
+  real ones) don't work yet.
 - Usage is `agent_native_acp` (Pi self-reports), not gateway-captured, because
   Pi's model resolution requires bypassing the LiteLLM proxy.
 - The sync-back is **additive**: files the agent *creates/edits* propagate to the

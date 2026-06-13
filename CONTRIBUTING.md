@@ -1,7 +1,10 @@
 # Contributing
 
-Thanks for your interest! This is a small monorepo with two independent Python
-packages; each builds, tests, and ships on its own.
+Thanks for your interest! This is a small monorepo of agent packages —
+`mini-swe-acp`, `mini-swe-code`, `ai-sdk-acp`, and `ai-sdk-harness` — each
+builds, tests, and ships on its own. The `ai-sdk-*` packages pair a pure-JS ACP
+server (`server.mjs`) with a small Python `register.py` that wires the agent
+into BenchFlow.
 
 ## Dev setup
 
@@ -34,6 +37,21 @@ ruff check src tests
 
 The full upstream suite additionally needs provider API keys and container
 runtimes (podman, bubblewrap, apptainer) — not required for most changes.
+
+### ai-sdk-acp / ai-sdk-harness (Python ≥3.12 + Node)
+
+```bash
+cd ai-sdk-acp        # or ai-sdk-harness
+uv venv .venv && source .venv/bin/activate
+uv pip install --prerelease=allow -e ".[dev]"   # benchflow pins an rc litellm
+pytest -q                                        # key-free; no sandbox/model needed
+ruff check src tests
+node --check src/*/server.mjs                    # JS server syntax
+```
+
+The JS `server.mjs` is base64-deployed into the benchflow sandbox by
+`register.py`'s install command (its npm deps are installed there). Running it
+against a live benchmark needs Node, a sandbox (docker/daytona), and a model.
 
 ## CI
 
