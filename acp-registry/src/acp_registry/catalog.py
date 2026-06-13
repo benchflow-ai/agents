@@ -297,10 +297,14 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         acp_model_format="provider/model",
         supports_acp_set_model=True,
         model_via="set_model",
-        reason="BYO via ~/.stakpak/config.toml api_endpoint + model "
-        "(provider-prefixed, e.g. anthropic/claude-...). Needs a binary "
-        "installer + a config-file writer (no env-only base URL). Notably "
-        "implements real session/set_model.",
+        reason="HARD-BLOCK on v0.3.88 (source-traced): the ACP path resolves "
+        "model->provider with a substring heuristic that only knows anthropic/"
+        "openai/google and falls through to 'stakpak' otherwise, so a custom "
+        "endpoint can't be routed via `stakpak acp` (the correct split resolver "
+        "exists only in the hosted-server path). It also advertises a VALIDATED "
+        "ACP model option backed by the static models.dev openai catalog. Config "
+        "schema (~/.stakpak/config.toml api_endpoint + provider-prefixed model) is "
+        "right, but won't route until upstream fixes acp/server.rs.",
         source="https://github.com/stakpak/agent",
     ),
     AcpAgent(
@@ -315,8 +319,15 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         summary="Rust coding agent; [[custom_providers]] with arbitrary base_url.",
         api_protocol="openai-completions",
         model_via="config-file",
+        known_issue="PROBED on DeepSeek/Daytona: installs + launches, then closes "
+        "stdout at the ACP session (`pipe_closed`). Config is "
+        "$HOME/.config/vtcode/vtcode.toml ([[custom_providers]] base_url + "
+        "api_key_env + [agent] provider/default_model); note base_url must include "
+        "the `/v1` suffix (vtcode posts to {base_url}/chat/completions, no "
+        "auto-append). Closest of the binary config-file agents — needs the "
+        "session failure root-caused.",
         reason="BYO via vtcode.toml [[custom_providers]] base_url + api_key_env "
-        "+ models. Needs a binary installer + config-file writer.",
+        "+ models (+ VT_ACP_ENABLED=1). Per-arch binary installs fine.",
         source="https://github.com/vinhnx/vtcode",
     ),
     AcpAgent(
@@ -348,9 +359,10 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         "OpenAI chat-completions host.",
         api_protocol="openai-completions",
         model_via="config-file",
-        reason="BYO via config.toml [providers.<name>] type=openai_legacy + "
-        "base_url + api_key (OPENAI_BASE_URL/OPENAI_API_KEY env overrides exist). "
-        "Ships PyInstaller Linux binaries; needs binary installer + config writer.",
+        reason="HARD-BLOCK (research): `kimi acp` is gated behind a mandatory "
+        "interactive OAuth login with no headless bypass, so it can't be wired "
+        "non-interactively. The config.toml [providers.<name>] type=openai_legacy "
+        "+ base_url + api_key schema is otherwise correct.",
         source="https://github.com/MoonshotAI/kimi-cli",
     ),
     AcpAgent(
@@ -479,8 +491,10 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         "Z.ai, local models. Optional account is telemetry-only.",
         api_protocol="openai-completions",
         model_via="config-file",
-        reason="BYO via ~/.autohand/config.json provider/baseUrl/apiKey/model "
-        "(AUTOHAND_CONFIG, AUTOHAND_MODEL). Needs a config-file writer.",
+        reason="HARD-BLOCK (research): despite the BYO marketing, it is not "
+        "headless-configurable for an arbitrary endpoint+key+model — the ACP "
+        "adapter's config path can't be driven non-interactively to a custom "
+        "provider. Revisit if upstream adds a headless config.",
         source="https://github.com/autohandai/code-cli",
     ),
     AcpAgent(
@@ -645,9 +659,10 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         "completions API (incl. LiteLLM, OpenRouter, Ollama).",
         api_protocol="openai-completions",
         model_via="flag",
-        reason="BYO via the `--api-url` flag (arbitrary OpenAI-compatible URL) + "
-        "--model — NOT a POOLSIDE_API_URL env var. Needs a binary (shell-installer) "
-        "path; CLI binary is proprietary.",
+        reason="HARD-BLOCK (research): although `pool exec --api-url` takes an "
+        "arbitrary OpenAI-compatible URL, the ACP server path can't be driven "
+        "headless to a custom endpoint (it advertises a validated model option and "
+        "routes through Poolside). Proprietary shell-installer binary.",
         source="https://docs.poolside.ai",
     ),
     AcpAgent(

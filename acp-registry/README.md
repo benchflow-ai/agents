@@ -123,23 +123,40 @@ base URL (true for DeepSeek and the gateway) — see its `known_issue`.
 
 ## Live verification (truth table)
 
-Every wired agent was run on Daytona/DeepSeek; several catalog candidates were also
-probed live. Honest results:
+**Every** BYO-tier agent was run through the pipeline (spec-extraction → install →
+launch → task) on Daytona/DeepSeek. Honest results — 2 work end-to-end; the rest
+each hit a concrete, confirmed blocker:
 
 | Agent | Dist | Live result |
 |---|---|---|
-| `qwen-code` | npx | ✅ **wired+verified** — reward 1.0 hello-world & real citation-check; gateway usage captured |
-| `goose` | binary | ✅ **wired+verified-runs** — reward 1.0 hello-world; real task ran clean (reward 0.0, agent didn't solve) |
-| `dirac` | npx | ⚠️ probed — **speaks ACP** (registry's `--acp` correct), entered the loop, but closed stdout mid-run (`pipe_closed`); not yet wireable |
-| `github-copilot-cli` | npx | ❌ probed — `-32000 Authentication required` on `@github/copilot@1.0.61`; BYOK not honored in ACP mode |
+| `qwen-code` | npx | ✅ **verified** — reward 1.0 hello-world & real citation-check; gateway usage captured |
+| `goose` | binary | ✅ **verified-runs** — reward 1.0 hello-world; real task ran clean (reward 0.0 — agent didn't solve, not an integration failure) |
+| `vtcode` | binary | ⚠️ installs + launches, then `pipe_closed` at the ACP session (config/base-URL — it needs the `/v1` suffix; needs per-agent debugging) |
+| `dirac` | npx | ⚠️ **speaks ACP** (registry's `--acp` correct), entered the loop (1 tool), then closed stdout mid-run (`pipe_closed`) |
+| `kilo` | npx | ⚠️ installs clean, `pipe_closed` at ACP launch |
+| `codebuddy-code` | npx | ⚠️ installs clean, `pipe_closed` at ACP launch |
+| `deepagents` | npx | ⚠️ installs clean, ACP `-32603` (LangChain `provider:model` colon wiring) |
+| `crow-cli` | (py) | ⚠️ installs, `pipe_closed` — actually a Python 3.14 pkg needing `uvx` + a `crow-mcp` subprocess, not a static binary |
+| `mistral-vibe` | binary | ⚠️ `rc=127` at launch (runtime dep / bin layout) |
+| `minion-code` | uvx | ⚠️ `rc=127` (uvx launch) |
+| `junie` | binary | ⚠️ `rc=127` (JetBrains; needs a JVM/runtime) |
+| `cline` | npx | ❌ `-32000` — needs a separate `cline auth` step first (+ known base-URL routing bugs) |
+| `dimcode` | npx | ❌ `-32000` — provider creds are interactive-only (`/connect`, sqlite); not headless |
+| `github-copilot-cli` | npx | ❌ `-32000` — BYOK not honored in ACP mode on `@github/copilot@1.0.61` |
+| `grok-build` | binary | ❌ install `rc=1` — xAI-gated download (SuperGrok) |
+| `stakpak` | binary | ❌ research hard-block — ACP path has a model→provider routing defect on v0.3.88 (validated against source) |
+| `kimi` | binary | ❌ research hard-block — mandatory interactive OAuth, no headless path |
+| `autohand` | npx | ❌ research hard-block — not headless-configurable for an arbitrary endpoint+key+model |
+| `poolside` | binary | ❌ research hard-block — not headless-wirable to a custom endpoint over ACP |
 
-The other catalog agents (config-file: `stakpak`/`vtcode`/`crow-cli`/`kimi`/
-`mistral-vibe`/`kilo`/`autohand`/`codebuddy`/`cline`; uvx: `fast-agent`/`minion-code`;
-proprietary-gated install: `junie`/`poolside`/`grok-build`; colon-model: `deepagents`;
-interactive-config: `dimcode`) are **not yet probed** — each needs a config-file
-writer / uvx bootstrap / install path before a fair run. Their recipes are in
-[AGENTS.md](AGENTS.md). Vendor-locked agents (9) and the marketplace entry can't run
-as model-enforced evals at all.
+⚠️ = installs + launches but the ACP session fails (a bounded per-agent fix: exact
+config schema, base-URL suffix, or runtime dep). ❌ = a real blocker (auth gate,
+interactive-only config, gated install, or upstream defect). The pipeline
+(`spec-extraction → probe-gen → live-verify`) is reusable, so each ⚠️ is now a
+known, bounded task rather than open research.
+
+Vendor-locked agents (9) + the marketplace entry can't run as model-enforced evals
+at all; the 5 native agents already ship in BenchFlow.
 
 ## Adding more agents
 
