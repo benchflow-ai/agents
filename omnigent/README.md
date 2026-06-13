@@ -42,6 +42,14 @@ one-shot CLI there.
   `--python 3.12`.
 - **Internet egress** for the model/provider calls (BenchFlow's resolved
   provider gateway).
+- **Usage tracking ON** (`auto` — the default — or `required`; *not* `off`).
+  omnigent's model calls run *inside the sandbox*, so they must route through
+  BenchFlow's litellm usage proxy to be captured. The adapter writes whatever
+  `BENCHFLOW_PROVIDER_BASE_URL` resolves to into omnigent's config, so with usage
+  tracking on that is the proxy and tokens are captured. With
+  `usage_tracking="off"` the calls go direct, no tokens are captured, and (on
+  BenchFlow 0.7) the zero-activity guard — zero tokens **and** zero tool calls —
+  treats the run as a silent provider failure and nulls the reward.
 
 ## Install
 
@@ -103,7 +111,8 @@ install `uv`; `uv tool install omnigent` in its own venv (`--python 3.12`);
 ## Verification
 
 `omnigent-pi` scores **reward 1.0** end-to-end in `bench eval` on a Daytona
-(x86_64) sandbox with `deepseek/deepseek-chat`:
+(x86_64) sandbox with `deepseek/deepseek-chat`, against a BenchFlow carrying the
+session-factory seam (validated on the 0.7 line, `trajectory_source="session"`):
 
 - **hello-world** (toy file-write) — full pipeline green: install → connect →
   `omnigent run` → verifier.
@@ -111,6 +120,9 @@ install `uv`; `uv tool install omnigent` in its own venv (`--python 3.12`);
   citation APIs over the network, detect the hallucinated entries, write sorted
   JSON. All 9 verifier tests passed (all three fake citations detected, correct
   count, clean titles).
+
+Both runs used the default (`auto`) usage tracking so omnigent routed through
+the proxy; see Requirements on why `usage_tracking="off"` nulls the reward.
 
 Known limitation: the stdout-parsing adapter emits only the prompt + final
 agent message, so per-tool-call trajectory granularity is coarse (`n_tool_calls`
