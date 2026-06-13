@@ -26,3 +26,8 @@ jobs:
       - name: Lint mini-swe-code
         working-directory: mini-swe-code
         run: ruff check src tests
+      - name: Lint mini-computer-agent
+        working-directory: mini-computer-agent
+        run: |
+          ruff check src tests
+          ruff format --check src tests

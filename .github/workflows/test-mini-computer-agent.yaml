@@ -1,0 +1,34 @@
+name: mini-computer-agent
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mini-computer-agent/**'
+      - '.github/workflows/test-mini-computer-agent.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mini-computer-agent/**'
+      - '.github/workflows/test-mini-computer-agent.yaml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+        working-directory: mini-computer-agent
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      # --prerelease=allow: benchflow pins an rc litellm
+      - name: Install dependencies
+        run: uv pip install --python ${Python_ROOT_DIR} --prerelease=allow -e '.[dev]'
+      - name: Run pytest
+        run: pytest -q
