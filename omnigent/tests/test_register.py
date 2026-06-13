@@ -1,0 +1,100 @@
+"""Registration + pure-helper tests for the Omnigent BenchFlow agent.
+
+The pure helpers (``_normalize_base_url`` / ``_build_config_yaml``) and the
+``install_cmd`` content are import-safe and run on any benchflow. The full
+registration assertions gate on the session-factory seam: on a benchflow whose
+``VALID_PROTOCOLS`` lacks ``"session-factory"`` (e.g. published 0.6.x),
+``register()`` returns ``None`` by design and those tests skip.
+"""
+
+import pytest
+
+from omnigent.agent import _build_config_yaml, _normalize_base_url
+from omnigent.register import (
+    OMNIGENT_PIN,
+    OMNIGENT_SESSION_FACTORY,
+    OMNIGENT_INSTALL_CMD,
+    register,
+)
+
+
+def _seam_present() -> bool:
+    try:
+        from benchflow.agents.registry import VALID_PROTOCOLS
+    except Exception:
+        return False
+    return "session-factory" in VALID_PROTOCOLS
+
+
+# ── Pure helpers (no seam, no sandbox runtime) ────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("https://api.deepseek.com", "https://api.deepseek.com/v1"),
+        ("https://api.deepseek.com/", "https://api.deepseek.com/v1"),
+        ("https://api.deepseek.com/v1", "https://api.deepseek.com/v1"),
+        ("https://api.deepseek.com/v1/", "https://api.deepseek.com/v1"),
+        ("", ""),
+    ],
+)
+def test_normalize_base_url(raw: str, expected: str) -> None:
+    assert _normalize_base_url(raw) == expected
+
+
+def test_build_config_yaml_quotes_and_shape() -> None:
+    yaml = _build_config_yaml(
+        base_url="https://api.deepseek.com/v1",
+        api_key='sk-"weird"\\key',
+        model="deepseek-chat",
+    )
+    assert "kind: gateway" in yaml
+    assert "wire_api: chat" in yaml
+    # scalar values are double-quoted (the model lands under models.default).
+    assert 'default: "deepseek-chat"' in yaml
+    assert 'base_url: "https://api.deepseek.com/v1"' in yaml
+    # YAML-special chars in the key are escaped inside double quotes.
+    assert '\\"weird\\"' in yaml and "\\\\key" in yaml
+
+
+# ── install_cmd content (import-safe) ─────────────────────────────────────
+
+
+def test_install_cmd_has_node_on_bare_path_and_tmux() -> None:
+    cmd = OMNIGENT_INSTALL_CMD
+    # node/npm/npx symlinked onto the bare PATH (pi is a node-shebang script).
+    assert "for _b in node npm npx" in cmd
+    # tmux installed (managed REPL terminal needs it).
+    assert "tmux" in cmd
+    # final verify covers the whole toolchain.
+    assert "which pi" in cmd and "which node" in cmd and "which tmux" in cmd
+    # pinned omnigent + pinned python.
+    assert f"omnigent=={OMNIGENT_PIN}" in cmd and "--python 3.12" in cmd
+
+
+def test_session_factory_points_into_this_package() -> None:
+    assert OMNIGENT_SESSION_FACTORY == "omnigent.agent:build_omnigent_agent"
+
+
+# ── Full registration (gated on the session-factory seam) ─────────────────
+
+
+def test_register_returns_none_without_seam() -> None:
+    if _seam_present():
+        pytest.skip("benchflow build HAS the session-factory seam")
+    assert register() is None
+
+
+def test_register_wires_session_factory_with_seam() -> None:
+    if not _seam_present():
+        pytest.skip("benchflow build lacks the session-factory seam")
+    from benchflow.agents.registry import resolve_agent
+
+    config = register()
+    assert config is not None
+    assert config.name == "omnigent-pi"
+    assert config.protocol == "session-factory"
+    assert config.session_factory == OMNIGENT_SESSION_FACTORY
+    # resolvable by name through the public registry.
+    assert resolve_agent("omnigent-pi").session_factory == OMNIGENT_SESSION_FACTORY
