@@ -4,9 +4,9 @@
 
 All **36** agents in the Agent Client Protocol registry (snapshot `v1.0.0`, see [`registry.snapshot.json`](registry.snapshot.json)), classified by whether they can run as a faithful, model-enforced BenchFlow eval. Source of truth: [`src/acp_registry/catalog.py`](src/acp_registry/catalog.py).
 
-**Tally:** wired: 2 · catalog: 19 · native: 5 · vendor-locked: 9 · out-of-scope: 1.
+**Tally:** wired: 3 · catalog: 18 · native: 5 · vendor-locked: 9 · out-of-scope: 1.
 
-## Wired (2)
+## Wired (3)
 
 `register()` installs these. Routing is verified *by construction* (confirmed env vars + a model format BenchFlow can emit); see the honesty bar in the README for what that does and doesn't claim.
 
@@ -14,8 +14,9 @@ All **36** agents in the Agent Client Protocol registry (snapshot `v1.0.0`, see 
 |---|---|---|---|---|---|
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen-code` | Apache-2.0 | `openai-completions` | hello-world (reward 1.0), skillsbench/citation-check (reward 1.0, 33 tool calls) | Cleanest fit in the registry: base URL, key, AND model are all plain env vars (OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL), so BenchFlow's env_mapping routes it with no config file and no model-id translation. Verified end-to-end on DeepSeek via Daytona (reward 1.0 on hello-world) with the `acp_model_via_env` fix. **Known issue:** qwen-code advertises an ACP `model` session config option whose values it validates against its OWN model list, so BenchFlow's capability-first dispatch fails when it tries to set the benchmark's model id over ACP (-32603) — seen with both a gateway alias and a bare `deepseek-v4-flash`. The model is already delivered via env (OPENAI_MODEL), so the fix is to NOT drive it over ACP: this package enables BenchFlow's `acp_model_via_env` flag when present. That flag is a proposed BenchFlow change (see the PR); on a build without it, `register()` warns and qwen-code fails at model configuration. |
 | [goose](https://github.com/block/goose) | `goose` | Apache-2.0 | `openai-completions` | hello-world (reward 1.0), skillsbench/citation-check (ran end-to-end, no error; reward 0.0 — agent didn't solve it with deepseek-v4-flash, not an integration failure) | Per-arch Linux binary (x86_64 + aarch64) downloaded from the registry snapshot; all-env wiring (GOOSE_PROVIDER=openai, OPENAI_HOST/OPENAI_BASE_PATH, OPENAI_API_KEY, GOOSE_MODEL) — no config file. Verified end-to-end on DeepSeek via Daytona. **Known issue:** OPENAI_HOST is set to the provider base URL and OPENAI_BASE_PATH to a constant v1/chat/completions — correct for a host-only base URL (DeepSeek, the LiteLLM gateway). A provider whose base URL already carries a path would double it up; such providers need the custom_providers JSON instead. |
+| [DeepAgents](https://github.com/langchain-ai/deepagentsjs) | `deepagents` | MIT | `openai-completions` | hello-world (reward 1.0) | npx, pure-JS. Model is the LangChain `openai:<model>` colon form passed via `--model` (not over ACP); base URL/key via OPENAI_* env. The provider SDK (@langchain/openai) must be installed alongside (npm_extra) — it's imported lazily and the -32603 we first saw was that missing dep, not a model-option rejection. Verified end-to-end on DeepSeek via Daytona. **Known issue:** On the real skillsbench/citation-check task it ran ~10 tool calls then hit an in-run ACP -32603 (a mid-loop model/tool error, not an integration failure) — verified-RUNS, not verified-solves on hard tasks. |
 
-## Catalog (19)
+## Catalog (18)
 
 These can be pointed at an arbitrary OpenAI/Anthropic-compatible base URL, so they're adaptable — each is held back only by something this npx-only first pass doesn't ship (a config-file writer, a binary installer, a uvx bootstrap, or a model-id format BenchFlow can't emit). The **Recipe** column is the exact next step to wire it.
 
@@ -28,7 +29,6 @@ These can be pointed at an arbitrary OpenAI/Anthropic-compatible base URL, so th
 | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) | `mistral-vibe` | Apache-2.0 | binary | BYO via ~/.vibe/config.toml [[providers]] api_base + api_key_env_var. Ships a dedicated vibe-acp Linux binary; needs binary installer + config writer. |
 | [Kilo](https://github.com/Kilo-Org/kilocode) | `kilo` | MIT | npx | BYO via config file provider.<id>.options.baseURL + top-level model ({env:VAR} substitution; KILO_API_KEY env). npx-distributed (@kilocode/cli), but still needs a config-file writer (no env-only base URL), so not wired in this first pass. |
 | [Dirac](https://github.com/dirac-run/dirac) | `dirac` | Apache-2.0 | npx | npx, pure-JS, reads OPENAI_API_BASE (not OPENAI_BASE_URL), model via --model flag. ACP confirmed; held back on the mid-run stdout close. |
-| [DeepAgents](https://github.com/langchain-ai/deepagentsjs) | `deepagents` | MIT | npx | npx, pure-JS, and advertises an ACP 'model' config option — but model ids are provider-prefixed with a COLON (e.g. openai:gpt-...), a format BenchFlow can't currently emit (it does bare / provider-slash / registered-provider-slash). Base URL rides the underlying LangChain client's OPENAI_BASE_URL. Wire once a colon format is supported. |
 | [fast-agent](https://github.com/evalstate/fast-agent) | `fast-agent` | Apache-2.0 | uvx | BYO via OPENAI__BASE_URL / OPENAI__API_KEY (pydantic nested env, NOT plain OPENAI_BASE_URL) or fastagent.config.yaml, + --model. uvx-distributed, so it needs a uv bootstrap this npx-only first pass doesn't ship. |
 | [Autohand Code](https://github.com/autohandai/autohand-acp) | `autohand` | Apache-2.0 | npx | HARD-BLOCK (research): despite the BYO marketing, it is not headless-configurable for an arbitrary endpoint+key+model — the ACP adapter's config path can't be driven non-interactively to a custom provider. Revisit if upstream adds a headless config. |
 | [Nova](https://github.com/Compass-Agentic-Platform/nova) | `nova` | MIT | npx | npx — close to wireable via ANTHROPIC_BASE_URL or DEFAULT_OPENAI_BASE_URL + model env. Held back to first verify the optional Compass routing layer can be fully bypassed with raw ANTHROPIC_BASE_URL (it bundles @anthropic-ai/sdk). |

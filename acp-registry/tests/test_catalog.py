@@ -68,9 +68,12 @@ def test_wired_entries_are_routable_by_construction() -> None:
             assert src.startswith("BENCHFLOW_PROVIDER_"), src
             assert dst
         # A wired agent must have *some* way to receive the model.
-        assert agent.model_via in {"env", "config-option", "set_model"}
+        assert agent.model_via in {"env", "flag", "config-file", "config-option", "set_model"}
         if agent.model_via == "env":
             assert "BENCHFLOW_PROVIDER_MODEL" in agent.env_mapping
+        elif agent.model_via == "flag":
+            # the model rides a launch flag — acp_args must reference it
+            assert "$BENCHFLOW_PROVIDER_MODEL" in agent.acp_args
 
 
 def test_npx_wired_entries_have_no_launch_env() -> None:

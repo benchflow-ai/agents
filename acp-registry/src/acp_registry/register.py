@@ -23,6 +23,8 @@ from pathlib import Path
 
 from benchflow.agents.registry import (
     AGENTS,
+    _BENCHFLOW_JS_AGENT_PREFIX,
+    _BENCHFLOW_NODE_PREFIX,
     _js_agent_install,
     _js_agent_launch,
     register_agent,
@@ -96,7 +98,16 @@ def _launch_env_prefix(spec: AcpAgent) -> str:
 def _install_cmd(spec: AcpAgent) -> str:
     if spec.distribution == BINARY:
         return _binary_install(spec)
-    return _js_agent_install(spec.bin_name, spec.package)
+    cmd = _js_agent_install(spec.bin_name, spec.package)
+    if spec.npm_extra:
+        # Some agents lazily import a provider SDK the npm pkg doesn't bundle
+        # (e.g. deepagents -> @langchain/openai). Install it into the same prefix.
+        pkgs = " ".join(spec.npm_extra)
+        cmd += (
+            f" && {_BENCHFLOW_NODE_PREFIX}/bin/npm install -g --prefix "
+            f"{_BENCHFLOW_JS_AGENT_PREFIX} {pkgs} --no-audit --no-fund >/dev/null 2>&1"
+        )
+    return cmd
 
 
 def _launch_cmd(spec: AcpAgent) -> str:
@@ -124,14 +135,14 @@ def _register_spec(spec: AcpAgent) -> None:
         requires_env=[],
         description=spec.summary,
     )
-    if spec.model_via == "env":
-        # The model is delivered via env_mapping (BENCHFLOW_PROVIDER_MODEL ->
-        # the agent's model env var), so BenchFlow must NOT also drive it over
-        # ACP. Many ACP agents (e.g. qwen-code) advertise a "model" session
-        # config option that validates the value against their *own* model list
-        # and reject the benchmark's id (ACP -32603), so capability-first
-        # dispatch would otherwise fail at session setup. `acp_model_via_env`
-        # tells BenchFlow to skip ACP model configuration entirely.
+    if not spec.supports_acp_set_model:
+        # The model is delivered out-of-band (env_mapping, a launch flag, or a
+        # config file) — NOT via ACP set_model — so BenchFlow must not drive it
+        # over ACP. Many ACP agents advertise a "model" session config option
+        # that validates the value against their *own* model list and reject the
+        # benchmark's id (ACP -32603), so capability-first dispatch would
+        # otherwise fail at session setup. `acp_model_via_env` skips ACP model
+        # configuration entirely. (Only set_model agents keep the ACP path.)
         if hasattr(cfg, "acp_model_via_env"):
             cfg.acp_model_via_env = True
         else:

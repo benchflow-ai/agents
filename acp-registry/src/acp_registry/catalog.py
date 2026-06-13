@@ -80,6 +80,8 @@ class AcpAgent:
     supports_acp_set_model: bool = False
     model_via: str = ""  # "env" | "flag" | "config-file" | "set_model" | "config-option"
     bin_name: str = ""  # npm bin name (npx install/launch); "" if N/A
+    npm_extra: tuple[str, ...] = ()  # extra npm pkgs to install beside an npx agent
+    #   (e.g. a provider SDK the agent imports lazily — deepagents needs @langchain/openai)
 
     # --- pointers / rationale ---------------------------------------------
     native_name: str = ""  # the BenchFlow built-in (status == NATIVE)
@@ -437,20 +439,35 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         license="MIT",
         repository="https://github.com/langchain-ai/deepagentsjs",
         distribution=NPX,
-        package="deepagents-acp",
-        acp_args="",
-        status=CATALOG,
-        summary="LangChain 'deep agents'; BYO model via LangChain "
-        "(init_chat_model provider:model strings).",
+        package="deepagents-acp@0.1.12",
+        # model is the LangChain provider:model COLON form, passed as a launch flag;
+        # base URL + key ride OPENAI_BASE_URL/OPENAI_API_KEY (env_mapping).
+        acp_args="--model openai:$BENCHFLOW_PROVIDER_MODEL --workspace . "
+        "--log-file /tmp/deepagents-acp.log",
+        bin_name="deepagents-acp",
+        # deepagents-acp lazily init_chat_model's its provider SDK at prompt time —
+        # the npm pkg doesn't bundle it, so install @langchain/openai alongside.
+        npm_extra=("@langchain/openai@1.4.7",),
+        status=WIRED,
+        summary="LangChain 'deep agents' over ACP — BYO via OPENAI_BASE_URL + a "
+        "`--model openai:<model>` flag. Verified running in BenchFlow.",
         api_protocol="openai-completions",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+        },
         acp_model_format="bare",
-        supports_acp_set_model=True,  # advertises a "model" config option
-        model_via="config-option",
-        reason="npx, pure-JS, and advertises an ACP 'model' config option — but "
-        "model ids are provider-prefixed with a COLON (e.g. openai:gpt-...), a "
-        "format BenchFlow can't currently emit (it does bare / provider-slash / "
-        "registered-provider-slash). Base URL rides the underlying LangChain "
-        "client's OPENAI_BASE_URL. Wire once a colon format is supported.",
+        supports_acp_set_model=False,  # model owned by the --model flag, not ACP
+        model_via="flag",
+        verified=("hello-world (reward 1.0)",),
+        known_issue="On the real skillsbench/citation-check task it ran ~10 tool "
+        "calls then hit an in-run ACP -32603 (a mid-loop model/tool error, not an "
+        "integration failure) — verified-RUNS, not verified-solves on hard tasks.",
+        reason="npx, pure-JS. Model is the LangChain `openai:<model>` colon form "
+        "passed via `--model` (not over ACP); base URL/key via OPENAI_* env. The "
+        "provider SDK (@langchain/openai) must be installed alongside (npm_extra) "
+        "— it's imported lazily and the -32603 we first saw was that missing dep, "
+        "not a model-option rejection. Verified end-to-end on DeepSeek via Daytona.",
         source="https://docs.langchain.com/oss/javascript/deepagents/acp",
     ),
     AcpAgent(

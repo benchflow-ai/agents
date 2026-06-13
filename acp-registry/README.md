@@ -124,20 +124,22 @@ base URL (true for DeepSeek and the gateway) — see its `known_issue`.
 ## Live verification (truth table)
 
 **Every** BYO-tier agent was run through the pipeline (spec-extraction → install →
-launch → task) on Daytona/DeepSeek. Honest results — 2 work end-to-end; the rest
-each hit a concrete, confirmed blocker:
+launch → task) on Daytona/DeepSeek, then a per-agent fix fan-out (one subagent each,
+root-causing from rollout artifacts + upstream source) re-probed the failures.
+Honest results — **3 work end-to-end**; the rest each hit a concrete, confirmed
+blocker:
 
 | Agent | Dist | Live result |
 |---|---|---|
 | `qwen-code` | npx | ✅ **verified** — reward 1.0 hello-world & real citation-check; gateway usage captured |
 | `goose` | binary | ✅ **verified-runs** — reward 1.0 hello-world; real task ran clean (reward 0.0 — agent didn't solve, not an integration failure) |
-| `vtcode` | binary | ⚠️ installs + launches, then `pipe_closed` at the ACP session (config/base-URL — it needs the `/v1` suffix; needs per-agent debugging) |
-| `dirac` | npx | ⚠️ **speaks ACP** (registry's `--acp` correct), entered the loop (1 tool), then closed stdout mid-run (`pipe_closed`) |
-| `kilo` | npx | ⚠️ installs clean, `pipe_closed` at ACP launch |
-| `codebuddy-code` | npx | ⚠️ installs clean, `pipe_closed` at ACP launch |
-| `deepagents` | npx | ⚠️ installs clean, ACP `-32603` (LangChain `provider:model` colon wiring) |
-| `crow-cli` | (py) | ⚠️ installs, `pipe_closed` — actually a Python 3.14 pkg needing `uvx` + a `crow-mcp` subprocess, not a static binary |
-| `mistral-vibe` | binary | ⚠️ `rc=127` at launch (runtime dep / bin layout) |
+| `deepagents` | npx | ✅ **verified-runs** — reward 1.0 hello-world (fix: install `@langchain/openai` alongside + `--model openai:<m>`); real task ran ~10 tools then an in-run `-32603` |
+| `vtcode` | binary | ⚠️ fix applied (`[agent] provider` + `api_key_env` + `/v1`), still exits at launch (`rc=127`) — closest config-file binary |
+| `dirac` | npx | ⚠️ speaks ACP, enters loop, exits mid-run (`rc=255`) |
+| `kilo` | npx | ⚠️ install `rc=1` after fix |
+| `codebuddy-code` | npx | ⚠️ `pipe_closed` at ACP launch |
+| `crow-cli` | uvx | ⚠️ Python 3.14 + `uvx` + a `crow-mcp` subprocess; `pipe_closed` |
+| `mistral-vibe` | binary | ⚠️ install `rc=1` (zip/runtime) |
 | `minion-code` | uvx | ⚠️ `rc=127` (uvx launch) |
 | `junie` | binary | ⚠️ `rc=127` (JetBrains; needs a JVM/runtime) |
 | `cline` | npx | ❌ `-32000` — needs a separate `cline auth` step first (+ known base-URL routing bugs) |
