@@ -10,7 +10,7 @@
 [The eval ↔ prod gap](#the-eval--prod-gap) ·
 [Agents](#agents) ·
 [Parity](#parity-the-same-agent-in-both) ·
-[Quickstarts](#quickstarts) ·
+[Adapt a new agent](#adapt--verify-a-new-agent) ·
 [Contributing](#contributing)
 
 </div>
@@ -37,34 +37,39 @@ you want to both ship and benchmark.
 
 ## Agents
 
-Each agent is a self-contained package: a real production runtime plus a thin
-ACP adapter that registers it into BenchFlow via the public `register_agent`
-extension point (so integrations live here, not baked into the framework).
+| Family | Agents | Eval on BenchFlow |
+|---|---|---|
+| [**mini-swe**](mini-swe-code/) | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) behind opencode's TUI ([mini-swe-code](mini-swe-code/)) + an ACP shim ([mini-swe-acp](mini-swe-acp/)) | ✅ stable — faithful SWE-agent harness (>74% SWE-bench verified) |
+| [**ai-sdk**](ai-sdk/) | the Vercel AI SDK agent surface — `ToolLoopAgent` ([acp](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/)} | mixed — `acp` ✅ (parity byte-verified), `harness-pi` ✅ (file tasks), `codex`/`claude-code` 🧪 (need a Vercel sandbox). Per-agent maturity in [ai-sdk/README](ai-sdk/README.md). |
 
-| Agent | What it is | Production | Evaluation | Maturity |
-|---|---|---|---|---|
-| [**mini-swe-acp**](mini-swe-acp/) / [**mini-swe-code**](mini-swe-code/) | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) (the SWE-bench team's ~100-line, one-bash-tool harness) behind opencode's TUI + an ACP shim | `mini-opencode` TUI | ACP on BenchFlow | ✅ Stable — faithful upstream harness (>74% SWE-bench verified) |
-| [**ai-sdk-acp**](https://github.com/benchflow-ai/agents/pull/1) | A [Vercel AI SDK](https://ai-sdk.dev) `ToolLoopAgent` (you program the loop) wrapped as an ACP server, model routed through BenchFlow's gateway | Any AI SDK app | ACP on BenchFlow | 🔜 PR [#1](https://github.com/benchflow-ai/agents/pull/1) (open) — **inside==outside parity byte-verified**; broader task coverage in progress |
-| [**ai-sdk-harness**](ai-sdk-harness/) | The [AI SDK 7 `HarnessAgent`](https://ai-sdk.dev/v7/providers/ai-sdk-harnesses) (Pi harness) on a local sandbox | AI SDK 7 apps | ACP on BenchFlow | 🧪 Experimental / canary — runs self-contained file tasks; **not yet suitable for real toolchain workloads** (see its README) |
+Each agent is a self-contained package: a production runtime + a thin ACP adapter
+registered via the public `register_agent` extension point.
 
 ## Parity: the same agent in both
 
-The point isn't just "it runs in both places" — it's that it **behaves the
-same** in both. For `ai-sdk-acp` (PR [#1](https://github.com/benchflow-ai/agents/pull/1)) this is
-verified at the wire level: with the
-agent driven inside BenchFlow vs. standalone, the upstream model request is
-**byte-identical** (same system+user prompt, tools, and sampling params) apart
-from neutral gateway artifacts; tool-use, file output, reward, and finish reason
-match. BenchFlow provides the environment and captures the trajectory — it does
-not perturb the agent.
+The point isn't just "it runs in both places" — it's that it **behaves the same**
+in both. For `ai-sdk/acp` this is verified at the wire level: driven inside
+BenchFlow vs. standalone, the upstream model request is **byte-identical** (same
+system+user prompt, tools, sampling params) apart from neutral gateway artifacts;
+tool-use, file output, reward, and finish reason match. BenchFlow provides the
+environment and captures the trajectory — it does not perturb the agent. The
+[**adaptation-parity skill**](skills/adaptation-parity) automates this check;
+methodology in [docs/parity.md](docs/parity.md).
 
-> **Honesty matters more than a green checkmark.** Parity and breadth are
-> works in progress, not finished claims. Toy tasks (a single file write) pass
-> easily and prove very little; real eval workloads — input files, real
-> toolchains (`pytest`, network), skills — are what expose the gaps. We need
-> **more tasks, of more variants**, run end-to-end, before any agent here is
-> called "verified" beyond its quickstart. Each agent's README states honestly
-> what it has and hasn't been run against.
+> **Honesty matters more than a green checkmark.** Toy tasks (a single file write)
+> pass easily and prove little; real eval workloads — input files, real toolchains
+> (`pytest`, network), skills — expose the gaps. No agent here is "verified" beyond
+> its quickstart; e.g. `harness-pi` passes hello-world but not the real SkillsBench
+> `citation-check`. We need **more tasks, of more variants**, run end-to-end. Each
+> package README states plainly what it has and hasn't been run against.
+
+## Adapt & verify a new agent
+
+1. **Adapt** — write an ACP server + `register.py` ([docs/adaptation.md](docs/adaptation.md)).
+   Scaffold from `ai-sdk/acp`:
+   `python skills/adaptation-parity/scripts/scaffold_ai_sdk_agent.py <name>`.
+2. **Verify parity** — inside vs. standalone, with the skill's `acp_capture.mjs` +
+   `parity_diff.py` ([docs/parity.md](docs/parity.md)).
 
 ## Quickstarts
 
@@ -98,38 +103,38 @@ await SDK().run(task_path="...", agent="mini-swe", model="openai/gpt-4o-mini")
 Per-agent setup, design notes, and caveats live in each package's README:
 [mini-swe-code](mini-swe-code/README.md) ·
 [mini-swe-acp](mini-swe-acp/README.md) ·
-[ai-sdk-acp (PR #1)](https://github.com/benchflow-ai/agents/pull/1) ·
-[ai-sdk-harness](ai-sdk-harness/README.md).
+[ai-sdk/*](ai-sdk/README.md).
 
 ## Repository layout
 
 ```text
 mini-swe-code/    mini-swe-agent distribution + opencode TUI (CLIs: mini, mini-opencode)
 mini-swe-acp/     mini-swe-agent as a BenchFlow ACP agent
-ai-sdk-acp/       Vercel AI SDK ToolLoopAgent as a BenchFlow ACP agent (PR #1, pending)
-ai-sdk-harness/   Vercel AI SDK 7 HarnessAgent (Pi) as a BenchFlow ACP agent (experimental)
-.github/          CI: per-package tests (path-filtered), ruff lint, markdown link check
+ai-sdk/           Vercel AI SDK agents: acp, harness-pi, harness-codex, harness-claude-code
+skills/           adaptation-parity skill — adapt an agent + verify eval/prod parity
+docs/             adaptation.md, parity.md
+.github/          CI: per-family tests (path-filtered), ruff lint, markdown link check
 ```
 
 Each package builds, tests, and ships independently; add a new agent as a new
-top-level directory + a per-package CI workflow.
+package + a per-package CI workflow (or extend the `ai-sdk` matrix).
 
 ## Contributing
 
-Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup,
-test commands, and conventions. High-value contributions right now:
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). High-value now:
 
-- **More benchmark tasks, of more variants** — input-file tasks, real-toolchain
-  tasks (`pytest`/build), skill-based tasks — run end-to-end against each agent
-  to find (and close) eval↔prod behavior gaps.
-- New agent integrations (any production agent + a thin ACP adapter).
+- **More benchmark tasks, of more variants** — input-file / real-toolchain
+  (`pytest`/build) / skill-based — run end-to-end against each agent to find and
+  close eval↔prod behavior gaps.
+- New agent integrations (any production agent + a thin ACP adapter; scaffold +
+  verify with the [adaptation-parity skill](skills/adaptation-parity)).
 - Parity reports: same agent, inside-BenchFlow vs. standalone, audited.
 
 ## License
 
 | Path | License |
 |---|---|
-| repository root, `mini-swe-acp/`, `ai-sdk-acp/`, `ai-sdk-harness/` | [Apache-2.0](LICENSE) |
+| repository root, `mini-swe-acp/`, `ai-sdk/`, `skills/` | [Apache-2.0](LICENSE) |
 | `mini-swe-code/` | [MIT](mini-swe-code/LICENSE.md) (upstream mini-swe-agent license, kept verbatim) |
 
 ## Acknowledgments
@@ -137,6 +142,6 @@ test commands, and conventions. High-value contributions right now:
 - [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) and the
   SWE-bench / SWE-agent team. If useful in research, cite their
   [SWE-agent paper](https://arxiv.org/abs/2405.15793).
-- [Vercel AI SDK](https://ai-sdk.dev) — the toolkit behind the `ai-sdk-*` agents.
+- [Vercel AI SDK](https://ai-sdk.dev) — the toolkit behind the `ai-sdk` agents.
 - [opencode](https://opencode.ai) — the TUI that makes the agent a pleasure to drive.
 - [Agent Client Protocol](https://agentclientprotocol.com) — the editor/agent-agnostic protocol the eval shims speak.

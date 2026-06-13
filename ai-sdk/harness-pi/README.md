@@ -11,7 +11,7 @@ A pure-JS ACP-over-stdio server (`server.mjs`) wraps `HarnessAgent` running the
 Pi harness on the **local** `@ai-sdk/sandbox-just-bash` sandbox, so the harness
 runs *inside* benchflow's task sandbox on the real task files. `register.py`
 wires it in via the public `register_agent` extension point — sibling to
-[`ai-sdk-acp`](../ai-sdk-acp) (which runs the AI SDK's own `ToolLoopAgent`).
+[`ai-sdk-acp`](../acp) (which runs the AI SDK's own `ToolLoopAgent`).
 
 ## Why only the Pi harness
 
@@ -101,7 +101,7 @@ and command limits (see Caveats), then running many task variants end-to-end.
 ## Dev
 
 ```bash
-cd ai-sdk-harness
+cd ai-sdk/harness-pi
 uv venv .venv && source .venv/bin/activate
 uv pip install --prerelease=allow -e ".[dev]"   # benchflow pins an rc litellm
 pytest -q                                        # key-free; no sandbox/model needed
