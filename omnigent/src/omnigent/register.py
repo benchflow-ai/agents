@@ -167,64 +167,79 @@ OMNIGENT_INSTALL_CMD = (
 )
 
 
+def _session_factory_seam_present() -> bool:
+    """True when the installed BenchFlow carries the session-factory seam.
+
+    ``"session-factory" in registry.VALID_PROTOCOLS`` is the single gate: the
+    membership, the ``AgentConfig.session_factory`` field, and the rollout
+    ``_connect_session_factory`` branch were all added together as one seam, so
+    this is a faithful proxy for "can the kernel actually drive this agent".
+    Older BenchFlow may lack ``VALID_PROTOCOLS`` entirely — treat any import
+    failure as "absent" so this is safe on every version.
+
+    Gating up front (rather than relying on ``register_agent`` to reject an
+    unknown protocol) makes behaviour identical across versions: published
+    BenchFlow does NOT validate ``protocol`` at registration time, so without
+    this gate it would silently register a non-functional ``omnigent-pi``.
+    """
+    try:
+        from benchflow.agents.registry import VALID_PROTOCOLS
+    except Exception:
+        return False
+    return "session-factory" in VALID_PROTOCOLS
+
+
 def register():
     """Register ``omnigent-pi``; idempotent (re-registration overwrites).
 
     Returns the created ``AgentConfig`` on success, or ``None`` when the
-    installed BenchFlow lacks the session-factory seam (logs a clear warning in
-    that case rather than raising, so importing the package is always safe).
+    installed BenchFlow lacks the session-factory seam (logs a clear warning and
+    does NOT register, so importing the package is always safe and never leaves a
+    non-connectable agent behind).
     """
-    try:
-        config = register_agent(
-            name="omnigent-pi",
-            description=(
-                "Databricks Omnigent `pi` harness, run INSIDE the BenchFlow "
-                "sandbox via the one-shot `omnigent run` CLI (non-ACP, "
-                "session-factory). Model + credentials are written into the "
-                "sandbox at connect() time from the resolved BenchFlow provider "
-                "routing."
-            ),
-            install_cmd=OMNIGENT_INSTALL_CMD,
-            # No ACP subprocess: the kernel uses the session_factory instead of
-            # launching + ACP-connecting. launch_cmd is kept descriptive only —
-            # the actual run is ``omnigent run`` shelled per turn by the session.
-            launch_cmd="omnigent run --harness pi",
-            protocol="session-factory",
-            # The benchmark model is forwarded per turn via ``omnigent run
-            # --model`` (read from BENCHFLOW_PROVIDER_MODEL by
-            # OmnigentAgent.connect); empty here lets --model /
-            # BENCHFLOW_PROVIDER_MODEL drive selection at runtime.
-            default_model="",
-            api_protocol="openai-completions",
-            # Identity passthrough: OmnigentAgent.connect reads
-            # BENCHFLOW_PROVIDER_* directly from agent_env (and writes them into
-            # the in-sandbox config.yaml), so no agent-native rename is needed.
-            # Keeping these in env_mapping documents the contract and keeps the
-            # keys in agent_env.
-            env_mapping={
-                "BENCHFLOW_PROVIDER_BASE_URL": "BENCHFLOW_PROVIDER_BASE_URL",
-                "BENCHFLOW_PROVIDER_API_KEY": "BENCHFLOW_PROVIDER_API_KEY",
-                "BENCHFLOW_PROVIDER_MODEL": "BENCHFLOW_PROVIDER_MODEL",
-            },
-            # Gateway URL/key resolved from the provider at runtime.
-            requires_env=[],
-        )
-    except (ValueError, TypeError) as e:
-        # register_agent rejects protocol="session-factory" on a BenchFlow whose
-        # VALID_PROTOCOLS lacks the seam (or whose signature predates it).
+    if not _session_factory_seam_present():
         logger.warning(
             "omnigent-pi NOT registered: this BenchFlow build lacks the "
-            "session-factory seam (%s). Install against a BenchFlow that has "
+            "session-factory seam. Install against a BenchFlow that has "
             "AgentConfig.session_factory + 'session-factory' in VALID_PROTOCOLS "
-            "+ rollout._connect_session_factory. See the omnigent README.",
-            e,
+            "+ rollout._connect_session_factory. See the omnigent README."
         )
         return None
 
+    config = register_agent(
+        name="omnigent-pi",
+        description=(
+            "Databricks Omnigent `pi` harness, run INSIDE the BenchFlow "
+            "sandbox via the one-shot `omnigent run` CLI (non-ACP, "
+            "session-factory). Model + credentials are written into the "
+            "sandbox at connect() time from the resolved BenchFlow provider "
+            "routing."
+        ),
+        install_cmd=OMNIGENT_INSTALL_CMD,
+        # No ACP subprocess: the kernel uses the session_factory instead of
+        # launching + ACP-connecting. launch_cmd is kept descriptive only —
+        # the actual run is ``omnigent run`` shelled per turn by the session.
+        launch_cmd="omnigent run --harness pi",
+        protocol="session-factory",
+        # The benchmark model is forwarded per turn via ``omnigent run
+        # --model`` (read from BENCHFLOW_PROVIDER_MODEL by
+        # OmnigentAgent.connect); empty here lets --model /
+        # BENCHFLOW_PROVIDER_MODEL drive selection at runtime.
+        default_model="",
+        api_protocol="openai-completions",
+        # Identity passthrough: OmnigentAgent.connect reads BENCHFLOW_PROVIDER_*
+        # directly from agent_env (and writes them into the in-sandbox
+        # config.yaml), so no agent-native rename is needed. Keeping these in
+        # env_mapping documents the contract and keeps the keys in agent_env.
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "BENCHFLOW_PROVIDER_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "BENCHFLOW_PROVIDER_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "BENCHFLOW_PROVIDER_MODEL",
+        },
+        # Gateway URL/key resolved from the provider at runtime.
+        requires_env=[],
+    )
     # Non-ACP field — set after construction so the core AgentConfig schema
-    # change stays minimal (one optional field; see benchflow registry.py). The
-    # field + ``"session-factory"`` in VALID_PROTOCOLS were added together as one
-    # seam, so a build that accepted the protocol above always carries the field;
-    # the try/except is the sole (and sufficient) degradation guard.
+    # change stays minimal (one optional field; see benchflow registry.py).
     config.session_factory = OMNIGENT_SESSION_FACTORY
     return config

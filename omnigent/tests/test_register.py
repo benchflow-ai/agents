@@ -80,10 +80,30 @@ def test_session_factory_points_into_this_package() -> None:
 # ── Full registration (gated on the session-factory seam) ─────────────────
 
 
-def test_register_returns_none_without_seam() -> None:
-    if _seam_present():
-        pytest.skip("benchflow build HAS the session-factory seam")
-    assert register() is None
+def test_seam_detection_matches_valid_protocols() -> None:
+    """The package's seam probe agrees with the helper used by these tests."""
+    from omnigent.register import _session_factory_seam_present
+
+    assert _session_factory_seam_present() == _seam_present()
+
+
+def test_register_returns_none_when_seam_absent(monkeypatch) -> None:
+    """Degradation path — version-independent: force the seam absent and assert
+    ``register()`` declines (returns None) rather than registering a
+    non-connectable agent. Published BenchFlow does not validate ``protocol`` at
+    registration time, so the up-front gate (not a register_agent exception) is
+    what guarantees this.
+    """
+    import sys
+
+    import omnigent.register  # noqa: F401  (ensure the submodule is in sys.modules)
+
+    # NB: the `omnigent` package attribute `register` is the *function*
+    # (re-exported by __init__), which shadows the submodule — so fetch the real
+    # module from sys.modules to patch its module-level helper.
+    register_mod = sys.modules["omnigent.register"]
+    monkeypatch.setattr(register_mod, "_session_factory_seam_present", lambda: False)
+    assert register_mod.register() is None
 
 
 def test_register_wires_session_factory_with_seam() -> None:
