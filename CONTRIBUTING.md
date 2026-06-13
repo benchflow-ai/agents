@@ -1,10 +1,12 @@
 # Contributing
 
 Thanks for your interest! This is a small monorepo of agent packages —
-`mini-swe-acp`, `mini-swe-code`, `ai-sdk-acp`, and `ai-sdk-harness` — each
-builds, tests, and ships on its own. The `ai-sdk-*` packages pair a pure-JS ACP
-server (`server.mjs`) with a small Python `register.py` that wires the agent
-into BenchFlow.
+`mini-swe-acp`, `mini-swe-code`, and the `ai-sdk/` group (`acp`, `harness-pi`,
+`harness-codex`, `harness-claude-code`) — each builds, tests, and ships on its
+own. The `ai-sdk/*` packages pair a pure-JS ACP server (`server.mjs`) with a
+small Python `register.py` that wires the agent into BenchFlow. New agents:
+scaffold + parity-check with the [`adaptation-parity`](skills/adaptation-parity)
+skill (`docs/adaptation.md`, `docs/parity.md`).
 
 ## Dev setup
 
@@ -38,10 +40,10 @@ ruff check src tests
 The full upstream suite additionally needs provider API keys and container
 runtimes (podman, bubblewrap, apptainer) — not required for most changes.
 
-### ai-sdk-acp / ai-sdk-harness (Python ≥3.12 + Node)
+### ai-sdk/* (Python ≥3.12 + Node)
 
 ```bash
-cd ai-sdk-acp        # or ai-sdk-harness
+cd ai-sdk/acp        # or harness-pi / harness-codex / harness-claude-code
 uv venv .venv && source .venv/bin/activate
 uv pip install --prerelease=allow -e ".[dev]"   # benchflow pins an rc litellm
 pytest -q                                        # key-free; no sandbox/model needed

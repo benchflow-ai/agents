@@ -13,7 +13,7 @@ dependencies = [
 
 [project.urls]
 Repository = "https://github.com/benchflow-ai/agents"
-Documentation = "https://github.com/benchflow-ai/agents/tree/main/ai-sdk-harness#readme"
+Documentation = "https://github.com/benchflow-ai/agents/tree/main/ai-sdk/harness-pi#readme"
 
 [project.optional-dependencies]
 dev = [

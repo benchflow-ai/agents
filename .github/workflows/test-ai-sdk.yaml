@@ -1,24 +1,28 @@
-name: ai-sdk-acp
+name: ai-sdk
 
 on:
   push:
     branches: [main]
     paths:
-      - 'ai-sdk-acp/**'
-      - '.github/workflows/test-ai-sdk-acp.yaml'
+      - 'ai-sdk/**'
+      - '.github/workflows/test-ai-sdk.yaml'
   pull_request:
     branches: [main]
     paths:
-      - 'ai-sdk-acp/**'
-      - '.github/workflows/test-ai-sdk-acp.yaml'
+      - 'ai-sdk/**'
+      - '.github/workflows/test-ai-sdk.yaml'
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: [acp, harness-pi, harness-codex, harness-claude-code]
     defaults:
       run:
         shell: bash -l {0}
-        working-directory: ai-sdk-acp
+        working-directory: ai-sdk/${{ matrix.pkg }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -34,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: uv pip install --python ${Python_ROOT_DIR} --prerelease=allow -e '.[dev]'
       - name: node --check server.mjs
-        run: node --check src/ai_sdk_acp/server.mjs
+        run: node --check src/*/server.mjs
       - name: Run pytest
         run: pytest -q
       - name: Ruff

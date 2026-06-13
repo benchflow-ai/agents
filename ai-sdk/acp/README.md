@@ -79,7 +79,7 @@ LiteLLM stream re-aggregation).
 ## Dev
 
 ```bash
-cd ai-sdk-acp
+cd ai-sdk/acp
 uv venv .venv && source .venv/bin/activate
 uv pip install --prerelease=allow -e ".[dev]"   # benchflow pins an rc litellm
 pytest -q                                        # key-free; no sandbox/model needed
