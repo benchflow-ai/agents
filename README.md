@@ -41,9 +41,11 @@ you want to both ship and benchmark.
 |---|---|---|
 | [**mini-swe**](mini-swe-code/) | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) behind opencode's TUI ([mini-swe-code](mini-swe-code/)) + an ACP shim ([mini-swe-acp](mini-swe-acp/)) | ✅ stable — faithful SWE-agent harness (>74% SWE-bench verified) |
 | [**ai-sdk**](ai-sdk/) | the Vercel AI SDK agent surface — `ToolLoopAgent` ([acp](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/)} | mixed — `acp` ✅ (parity byte-verified), `harness-pi` ✅ (file tasks), `codex`/`claude-code` 🧪 (need a Vercel sandbox). Per-agent maturity in [ai-sdk/README](ai-sdk/README.md). |
+| [**omnigent**](omnigent/) | [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents) `pi` meta-harness — the first **non-ACP** agent here: rides BenchFlow's Session path via a `session_factory`, shelling `omnigent run` inside the sandbox | ✅ reward 1.0 on hello-world **and** the real `citation-check` research task (DeepSeek/Daytona x86_64). Needs a BenchFlow with the session-factory seam — see [omnigent/README](omnigent/README.md). |
 
-Each agent is a self-contained package: a production runtime + a thin ACP adapter
-registered via the public `register_agent` extension point.
+Each agent is a self-contained package: a production runtime + a thin adapter
+(ACP, or BenchFlow's non-ACP Session path for `omnigent`) registered via the
+public `register_agent` extension point.
 
 ## Parity: the same agent in both
 
@@ -111,6 +113,7 @@ Per-agent setup, design notes, and caveats live in each package's README:
 mini-swe-code/    mini-swe-agent distribution + opencode TUI (CLIs: mini, mini-opencode)
 mini-swe-acp/     mini-swe-agent as a BenchFlow ACP agent
 ai-sdk/           Vercel AI SDK agents: acp, harness-pi, harness-codex, harness-claude-code
+omnigent/         Databricks Omnigent pi meta-harness as a non-ACP (session-factory) BenchFlow agent
 skills/           adaptation-parity skill — adapt an agent + verify eval/prod parity
 docs/             adaptation.md, parity.md
 .github/          CI: per-family tests (path-filtered), ruff lint, markdown link check
@@ -134,7 +137,7 @@ Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). High-value no
 
 | Path | License |
 |---|---|
-| repository root, `mini-swe-acp/`, `ai-sdk/`, `skills/` | [Apache-2.0](LICENSE) |
+| repository root, `mini-swe-acp/`, `ai-sdk/`, `omnigent/`, `skills/` | [Apache-2.0](LICENSE) |
 | `mini-swe-code/` | [MIT](mini-swe-code/LICENSE.md) (upstream mini-swe-agent license, kept verbatim) |
 
 ## Acknowledgments
