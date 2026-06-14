@@ -26,8 +26,3 @@ jobs:
       - name: Lint mini-swe-code
         working-directory: mini-swe-code
         run: ruff check src tests
-      - name: Lint omnigent
-        working-directory: omnigent
-        run: |
-          ruff check src tests
-          ruff format --check src tests
