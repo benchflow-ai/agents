@@ -77,6 +77,18 @@ def test_session_factory_points_into_this_package() -> None:
     assert OMNIGENT_SESSION_FACTORY == "omnigent.agent:build_omnigent_agent"
 
 
+def test_run_timeout_backstop_is_generous() -> None:
+    """The sandbox-exec backstop must sit ABOVE typical task budgets (600-900s)
+    so it never clips a legitimate long turn — the kernel's wait_for on the
+    task's own ``[agent] timeout_sec`` is the authoritative per-turn bound. A
+    once-hardcoded 600 clipped tasks with a 900s budget; default is now 1800,
+    overridable via BENCHFLOW_OMNIGENT_RUN_TIMEOUT_SEC.
+    """
+    from omnigent.session import _RUN_TIMEOUT_SEC
+
+    assert _RUN_TIMEOUT_SEC >= 900
+
+
 # ── Full registration (gated on the session-factory seam) ─────────────────
 
 

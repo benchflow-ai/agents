@@ -124,10 +124,24 @@ session-factory seam (validated on the 0.7 line, `trajectory_source="session"`):
 Both runs used the default (`auto`) usage tracking so omnigent routed through
 the proxy; see Requirements on why `usage_tracking="off"` nulls the reward.
 
-Known limitation: the stdout-parsing adapter emits only the prompt + final
-agent message, so per-tool-call trajectory granularity is coarse (`n_tool_calls`
-reads 0 even though the harness used tools). The reward is real; richer
-trajectories would come from parsing omnigent's `--debug-events` JSONL.
+Known limitation — coarse trajectories: the stdout-parsing adapter emits only
+the prompt + final agent message, so per-tool-call granularity is absent
+(`n_tool_calls` reads 0 even though the harness used tools). The reward is real;
+the trajectory just isn't step-auditable. This is **inherent to omnigent's
+headless one-shot mode**, not an easy fix: as of `omnigent==0.1.0`, the `-p`
+one-shot path exposes no tool-call stream — `--debug-events` only drives the
+interactive REPL event tape, `--log` is *rejected* with `-p`
+("only supported in interactive REPL mode"), and the server's `chat.db` is torn
+down on exit. Surfacing tool calls therefore requires a larger rework: keep the
+local server alive and poll its REST API (`/v1/sessions/<conv>/items`) for the
+turn's items, rather than the current fire-and-forget `omnigent run -p`. Tracked
+as a follow-up; the one-shot path is kept because it is simple and proven.
+
+Per-turn timeout: `omnigent run`'s sandbox-exec backstop is
+`BENCHFLOW_OMNIGENT_RUN_TIMEOUT_SEC` (default 1800s). The *authoritative* per-turn
+bound is the task's own `[agent] timeout_sec` (the kernel wraps `prompt()` in
+`asyncio.wait_for`); this backstop only sits above it so a hung exec can't run
+unbounded — keep it ≥ your largest task budget.
 
 ## Develop
 

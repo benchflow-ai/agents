@@ -47,6 +47,7 @@ lockstep with :mod:`benchflow.trajectories._capture`.
 from __future__ import annotations
 
 import logging
+import os
 import shlex
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -63,10 +64,16 @@ logger = logging.getLogger(__name__)
 # runs here so the files it writes land where the file-based verifier reads.
 _WORKSPACE = "/app"
 
-# Per-turn timeout for ``omnigent run`` (seconds). Generous — a full pi turn can
-# involve many model calls + tool executions. Sandbox.exec defaults to 30s,
-# which is far too short for an agent turn, so we pass this explicitly.
-_RUN_TIMEOUT_SEC = 600
+# Sandbox-exec backstop timeout for ``omnigent run`` (seconds). This is NOT the
+# authoritative per-turn timeout — the kernel wraps ``prompt()`` in
+# ``asyncio.wait_for(timeout=<task agent budget>)`` (rollout
+# ``_execute_session_prompts``), so the task's own ``[agent] timeout_sec`` is
+# what bounds a turn. This value only stops a hung ``sandbox.exec`` from running
+# unbounded if that kernel guard somehow doesn't fire; it must therefore sit
+# ABOVE typical task budgets (600–900s+) or it would clip legitimate long turns
+# (a hardcoded 600 once truncated tasks with a 900s budget). Override with
+# ``BENCHFLOW_OMNIGENT_RUN_TIMEOUT_SEC`` for unusually long benchmarks.
+_RUN_TIMEOUT_SEC = int(os.environ.get("BENCHFLOW_OMNIGENT_RUN_TIMEOUT_SEC", "1800"))
 
 # Substrings that mark a stdout line as server/health/framework noise rather
 # than substantive agent output. ``omnigent run`` spins its per-harness FastAPI
