@@ -224,10 +224,12 @@ class MimoAcp:
         except Exception as exc:  # noqa: BLE001 — close must never raise
             logger.warning("mimo acp close: kill failed: %s", exc)
         # Reap the process so its transport is torn down inside the running loop
-        # (otherwise a late GC tries to write_eof after the loop closed).
+        # (otherwise a late GC tries to write_eof after the loop closed). Bound the
+        # wait — a killed `mimo acp` that leaves child processes holding the pipes
+        # can otherwise make this hang.
         try:
-            await self._proc.wait()
-        except Exception:  # noqa: BLE001 — close must never raise
+            await asyncio.wait_for(self._proc.wait(), timeout=5)
+        except Exception:  # noqa: BLE001 — close must never raise (incl. TimeoutError)
             pass
 
     # ── one user turn ────────────────────────────────────────────────────
