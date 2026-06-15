@@ -50,7 +50,6 @@ import json
 import logging
 import os
 import shlex
-import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -167,9 +166,14 @@ class OmnigentSession:
         # events and accumulate cumulative usage, which the rollout collects via
         # ``latest_usage_totals``. Without this, a mimo run shows zero tokens AND
         # zero tool calls and BenchFlow nulls the reward as a suspected API error.
-        # A uuid (not ``id(self)``) guarantees a unique path — the low bits of a
-        # CPython object id collapse to a few values across sequential allocations.
-        self._mimo_trace_path = f"/tmp/omnigent-mimo-trace-{uuid.uuid4().hex}.json"
+        #
+        # This is a SANDBOX-LOCAL path and MUST equal mimo_harness.DEFAULT_TRACE_PATH:
+        # omnigent's `run` daemon spawns the harness with the daemon's env (NOT the
+        # `omnigent run` CLI env), so HARNESS_MIMO_TRACE set on the CLI line does
+        # not reach the harness — the path has to be agreed out-of-band, not via
+        # env. A fixed path is safe because each rollout owns its sandbox (one
+        # session per sandbox) and ``prompt`` truncates it before every turn.
+        self._mimo_trace_path = "/tmp/omnigent-mimo-trace.json"
         self._usage_totals: dict[str, int] = {}
         # Tool calls observed this rollout. Mirrors ``ACPSession.tool_calls`` (the
         # public mutable list the session-factory rollout reads via

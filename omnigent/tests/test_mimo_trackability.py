@@ -125,14 +125,26 @@ def test_prompt_emits_tool_calls_and_tracks_usage(_anyio):
         "output_tokens": 20,
         "total_tokens": 120,
     }
-    # the trace path is uuid-unique (not a colliding object-id)
-    assert "/tmp/omnigent-mimo-trace-" in sess._mimo_trace_path
+    # fixed sandbox-local trace path (env does not propagate to the daemon-spawned
+    # harness, so the path is agreed out-of-band, not via HARNESS_MIMO_TRACE)
+    assert sess._mimo_trace_path == "/tmp/omnigent-mimo-trace.json"
 
 
-def test_uuid_trace_paths_are_unique_across_sessions():
-    a = OmnigentSession(_FakeSandbox(), model="m", harness="mimo")
-    b = OmnigentSession(_FakeSandbox(), model="m", harness="mimo")
-    assert a._mimo_trace_path != b._mimo_trace_path
+def test_session_trace_path_matches_harness_default():
+    # The session reader and the in-sandbox harness writer MUST agree on the path,
+    # since the env carrying it does not reach the daemon-spawned harness. Assert
+    # the session's fixed path equals the harness module's DEFAULT_TRACE_PATH
+    # source-of-truth (read from the overlay source, which isn't importable here).
+    from pathlib import Path
+
+    import omnigent
+
+    harness_src = (
+        Path(omnigent.__file__).parent / "overlay" / "mimo_harness.py"
+    ).read_text()
+    assert 'DEFAULT_TRACE_PATH = "/tmp/omnigent-mimo-trace.json"' in harness_src
+    sess = OmnigentSession(_FakeSandbox(), model="m", harness="mimo")
+    assert sess._mimo_trace_path == "/tmp/omnigent-mimo-trace.json"
 
 
 def test_missing_trace_after_success_emits_degraded_warning(_anyio):
