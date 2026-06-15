@@ -143,10 +143,63 @@ bound is the task's own `[agent] timeout_sec` (the kernel wraps `prompt()` in
 `asyncio.wait_for`); this backstop only sits above it so a hung exec can't run
 unbounded — keep it ≥ your largest task budget.
 
+## `omnigent-mimo` — MiMo Code as a faithful `--harness mimo`
+
+Importing this package **also** registers `omnigent-mimo`: [MiMo Code](https://github.com/XiaomiMiMo)
+(Xiaomi, an OpenCode fork) running as a real Omnigent harness — *MiMo's own agent
+loop drives each turn*, not "Omnigent on the MiMo model."
+
+```python
+import omnigent  # registers omnigent-pi AND omnigent-mimo
+
+await SDK().run(task_path="...", agent="omnigent-mimo", model="mimo/mimo-auto")
+```
+
+Omnigent's `--harness` is a **closed enum** (no plugin seam), so `omnigent-mimo`
+is an **install-time overlay**: it installs stock `omnigent`, drops three modules
+into its site-packages `inner/`, and registers `"mimo"` by appending one line to
+each of the two registries (`_HARNESS_MODULES`, `OMNIGENT_HARNESSES`) — then
+**asserts the registration took** (fails the install loudly if Omnigent's
+internals drifted under the pin). The overlay modules:
+
+- `_mimo_acp.py` — a dependency-free ACP client that drives **`mimo acp`** (MiMo's
+  native JSON-RPC stdio server) and translates `session/update` notifications
+  into backend-neutral events. Unit-tested standalone in this package.
+- `mimo_executor.py` — `MimoExecutor(Executor)`: `run_turn` drives `mimo acp` and
+  yields the Omnigent event vocabulary (`TextChunk`/`ToolCallRequest`/
+  `TurnComplete`…); `handles_tools_internally=True` (MiMo runs its own tools).
+  This is the exact relationship `PiExecutor` has to `pi --mode rpc`.
+- `mimo_harness.py` — `create_app()` = `ExecutorAdapter(MimoExecutor).build()`,
+  the required harness-contract entrypoint registered under `"mimo"`.
+
+### Trackability (why MiMo can't just reuse the pi path)
+
+MiMo validates model ids against the models.dev catalog and **rejects BenchFlow's
+LiteLLM proxy alias** (`ProviderModelNotFoundError`, zero tokens), so unlike
+`omnigent-pi` it must run **`usage_tracking="off"`** with the bare model id +
+raw creds. That means the proxy captures **zero tokens**, and the one-shot
+`omnigent run -p` stdout is opaque — so a naive mimo run shows zero tokens **and**
+zero tool calls, and BenchFlow's zero-activity guard nulls the reward as a
+suspected API error. To keep mimo runs **trackable**:
+
+- `MimoExecutor` writes each turn's tool calls + **native ACP usage** to a trace
+  sidecar (`HARNESS_MIMO_TRACE`).
+- `OmnigentSession` (mimo path) reads it back and emits canonical `tool_call`
+  trajectory events (so `n_tool_calls > 0`, and the trajectory is
+  step-auditable — better than `omnigent-pi`'s prompt+final-message coarseness)
+  and reports cumulative native usage via `latest_usage_totals()` (so the
+  rollout's `_collect_native_acp_usage` attributes tokens, `total_tokens > 0`).
+
+The free `mimo/mimo-auto` channel needs no key and is the default verification
+model; `xiaomi/mimo-v2.5-pro` is opportunistic (`XIAOMI_API_KEY`, gateway creds
+routed via a sourced env file so the key never appears in `argv`).
+
+`omnigent-mimo` shares the session-factory seam + x86_64 requirements above.
+
 ## Develop
 
 ```bash
 pip install -e ".[dev]"
 ruff check src tests && ruff format --check src tests
-pytest   # registration tests; skip cleanly on a benchflow without the seam
+pytest   # registration + ACP-bridge + trackability tests; seam-gated ones skip
 ```
