@@ -23,6 +23,11 @@ jobs:
         run: |
           ruff check src tests
           ruff format --check src tests
+      - name: Lint ai-sdk/harness-mimo
+        working-directory: ai-sdk/harness-mimo
+        run: |
+          ruff check src tests
+          ruff format --check src tests
       - name: Lint mini-swe-code
         working-directory: mini-swe-code
         run: ruff check src tests
