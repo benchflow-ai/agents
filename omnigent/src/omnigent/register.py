@@ -299,10 +299,17 @@ def _build_mimo_install_cmd() -> str:
             f'printf %s {shlex.quote(b64)} | base64 -d > "$OMNI_PKG/inner/{name}"; '
         )
 
-    # Append-to-module registry registration (idempotent via grep guard).
+    # Append-to-module registry registration (idempotent via grep guard). Each
+    # appended statement is its own single-line ``printf`` argument — NEVER an
+    # embedded newline inside one quoted arg — because a real ``\n`` inside the
+    # printf %s argument does not survive shell transport reliably (it can reach
+    # the file as a literal ``\n``, which then SyntaxErrors the patched module).
     harness_modules_line = '_HARNESS_MODULES["mimo"] = "omnigent.inner.mimo_harness"'
-    compat_lines = (
-        'OMNIGENT_HARNESSES = OMNIGENT_HARNESSES | frozenset({"mimo"})\n'
+    # The two compat statements, appended via one ``printf '\n%s\n%s\n'`` with two
+    # separate args (so the newline between them comes from the format, not a
+    # newline embedded in an argument).
+    compat_stmt1 = 'OMNIGENT_HARNESSES = OMNIGENT_HARNESSES | frozenset({"mimo"})'
+    compat_stmt2 = (
         "_OMNIGENT_ACCEPTED_HARNESSES = OMNIGENT_HARNESSES | OMNIGENT_HARNESS_ALIASES"
     )
     # Also register mimo as model-override-capable (its model is routed via env,
@@ -352,10 +359,16 @@ def _build_mimo_install_cmd() -> str:
         "fi; "
         'export PATH="$HOME/.local/bin:$PATH"; '
         "command -v uv >/dev/null 2>&1 || { echo 'uv install failed' >&2; exit 1; }; "
-        # 4) Stock omnigent in its own uv-tool venv (--force => clean each run, so
-        #    the overlay appends never accumulate). --python 3.12 for cel-expr-python.
+        # 4) Stock omnigent in its own uv-tool venv. --python 3.12 for
+        #    cel-expr-python. **--link-mode=copy is REQUIRED**: uv hardlinks
+        #    package files from its shared cache by default, so the overlay's
+        #    append-to-installed-module step (7) would otherwise mutate the CACHED
+        #    file through the shared inode — poisoning every later install (even
+        #    `--force`) with the appended lines. Copy mode gives the venv private
+        #    file copies, so the appends touch only this install and `--force`
+        #    truly recreates a clean tree each run.
         "mkdir -p /usr/local/bin; "
-        "XDG_BIN_HOME=/usr/local/bin uv tool install --force --python 3.12 "
+        "XDG_BIN_HOME=/usr/local/bin uv tool install --force --link-mode=copy --python 3.12 "
         f"'omnigent=={OMNIGENT_PIN}' --with 'omnigent-client=={OMNIGENT_PIN}'; "
         # 5) Locate omnigent's package dir inside the tool venv.
         'OMNI_PY="$(uv tool dir)/omnigent/bin/python"; '
@@ -372,7 +385,7 @@ def _build_mimo_install_cmd() -> str:
         f"printf '\\n%s\\n' {shlex.quote(harness_modules_line)} >> \"$HMOD\"; "
         'CMPT="$OMNI_PKG/spec/_omnigent_compat.py"; '
         'grep -q \'frozenset({"mimo"})\' "$CMPT" || '
-        f"printf '\\n%s\\n' {shlex.quote(compat_lines)} >> \"$CMPT\"; "
+        f"printf '\\n%s\\n%s\\n' {shlex.quote(compat_stmt1)} {shlex.quote(compat_stmt2)} >> \"$CMPT\"; "
         'MOVR="$OMNI_PKG/model_override.py"; '
         '[ -f "$MOVR" ] && { grep -q \'_SDK_MODEL_OVERRIDE_HARNESSES | frozenset({"mimo"})\' "$MOVR" || '
         f"printf '\\n%s\\n' {shlex.quote(model_override_line)} >> \"$MOVR\"; }}; "

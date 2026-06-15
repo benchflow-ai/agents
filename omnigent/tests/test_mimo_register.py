@@ -68,6 +68,14 @@ def test_install_cmd_installs_omnigent_and_mimo_cli_not_pi():
     assert "for _b in node npm npx" in cmd and "tmux" in cmd
 
 
+def test_install_cmd_uses_copy_link_mode_to_avoid_cache_poisoning():
+    # uv hardlinks package files from its cache by default; the overlay appends to
+    # installed modules, which would mutate the shared cache inode and poison every
+    # later install. --link-mode=copy gives private file copies. (Caught live: an
+    # append-poisoned cache survived `--force` reinstall with a broken module.)
+    assert "--link-mode=copy" in MIMO_INSTALL_CMD
+
+
 def test_install_cmd_deploys_all_three_overlay_modules():
     cmd = MIMO_INSTALL_CMD
     for name in ("_mimo_acp.py", "mimo_executor.py", "mimo_harness.py"):
