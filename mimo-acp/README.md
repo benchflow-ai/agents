@@ -25,11 +25,17 @@ pip install "mimo-acp @ git+https://github.com/benchflow-ai/agents#subdirectory=
 import mimo_acp  # importing registers the `mimo` agent (alias: `mimo-code`)
 from benchflow import SDK
 
-# free, no-account channel — no key needed:
+# free, no-account channel — no key needed (this package's validated path):
 await SDK().run(task_path="...", agent="mimo", model="mimo/mimo-auto")
-# or MiMo's flagship (OpenAI-compatible; route via the gateway or XIAOMI_* creds):
-await SDK().run(task_path="...", agent="mimo", model="xiaomi/mimo-v2.5-pro")
 ```
+
+For MiMo's flagship **`xiaomi/mimo-v2.5-pro`**, use the *native `mimo` agent in
+benchflow core* ([PR #679](https://github.com/benchflow-ai/benchflow/pull/679)):
+it sets `acp_model_format="provider/model"` + writes a `mimocode.json`
+credential file, which keeps the `xiaomi/` provider prefix intact. This
+out-of-core package uses `acp_model_format="bare"` (so `mimo/mimo-auto` passes
+through), and `bare` *strips* the `xiaomi/` prefix — so the native-xiaomi route
+is not reliably available here.
 
 ## How it works
 
@@ -39,7 +45,7 @@ await SDK().run(task_path="...", agent="mimo", model="xiaomi/mimo-v2.5-pro")
   `OPENAI_BASE_URL`/`OPENAI_API_KEY` (the same OpenAI-compatible contract as
   [`ai-sdk/acp`](../ai-sdk/acp/)).
 - `install_cmd` bootstraps BenchFlow's isolated Node and `npm install`s the
-  pinned `@mimo-ai/cli@0.1.0` into `/opt/benchflow/js-agents/mimo-acp`.
+  pinned `@mimo-ai/cli@0.1.1` into `/opt/benchflow/js-agents/mimo-acp`.
 - `launch_cmd` runs `node …/@mimo-ai/cli/bin/mimo acp`.
 
 **Gotcha:** MiMo's ACP `initialize` reports `agentInfo.name="OpenCode"` (the
@@ -50,8 +56,8 @@ and is independent of that wire value.
 
 | model | key | notes |
 |---|---|---|
-| `mimo/mimo-auto` | none | free no-account channel; headless, works in-sandbox |
-| `xiaomi/mimo-v2.5-pro` | `XIAOMI_API_KEY` + `XIAOMI_BASE_URL` | flagship; OpenAI-compatible |
+| `mimo/mimo-auto` | none | free no-account channel; headless, works in-sandbox — **this package's validated path** |
+| `xiaomi/mimo-v2.5-pro` | `XIAOMI_API_KEY` + `XIAOMI_BASE_URL` | flagship — use the native `mimo` agent in benchflow core (`bare` strips the `xiaomi/` prefix here) |
 
 ## Dev
 
@@ -62,6 +68,8 @@ pytest -q
 ruff check src tests && ruff format --check src tests
 ```
 
-Live evidence (the native `mimo` agent, on BenchFlow): `xiaomi/mimo-v2.5-pro`
-solved `citation-check` (reward 1.0, 17 tool calls), and the free
-`mimo/mimo-auto` channel runs healthy end-to-end.
+Live evidence: the free **`mimo/mimo-auto`** channel runs healthy end-to-end
+through this package (native `mimo acp`, in-sandbox). The flagship
+**`xiaomi/mimo-v2.5-pro`** reward-1.0 / 17-tool-call `citation-check` result was
+the *native `mimo` agent in benchflow core* (which has the `provider/model` +
+`mimocode.json` wiring), **not** this out-of-core `bare` package.

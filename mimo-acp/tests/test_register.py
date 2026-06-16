@@ -16,10 +16,11 @@ def test_register_wires_mimo_native_acp() -> None:
     cfg = resolve_agent("mimo")
     assert cfg.name == "mimo"
     assert cfg.protocol == "acp"
-    # MiMo's xiaomi/mimo-v2.5-pro slot is OpenAI-compatible; the free
-    # mimo/mimo-auto model needs no key.
+    # Usage-capture for gateway-routed models lands in OPENAI_*; the free
+    # mimo/mimo-auto channel needs no key.
     assert cfg.api_protocol == "openai-completions"
-    # set_model sends the bare proxy alias; the OpenCode-fork forwards it.
+    # "bare" is required so the free mimo/mimo-auto id (no registered provider)
+    # passes through set_model unchanged to MiMo's native catalog.
     assert cfg.acp_model_format == "bare"
     assert cfg.supports_acp_set_model is True
 
@@ -27,7 +28,9 @@ def test_register_wires_mimo_native_acp() -> None:
 def test_install_pins_mimo_cli_no_server_mjs() -> None:
     cmd = _install_cmd()
     # Pinned npm package — reproducible (an unpinned float can break ACP).
-    assert "@mimo-ai/cli@0.1.0" in cmd
+    # Standardized at @0.1.1 across the agents-repo MiMo packages (the
+    # live-validated current release; benchflow-core #679 pins @0.1.0).
+    assert "@mimo-ai/cli@0.1.1" in cmd
     # Installs through BenchFlow's isolated node prefix, not the task image's.
     assert "/opt/benchflow" in cmd
     # mimo is a native ACP server: this package must NOT ship/deploy a server.mjs.
