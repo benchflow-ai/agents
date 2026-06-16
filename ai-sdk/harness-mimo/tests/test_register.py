@@ -27,7 +27,10 @@ def test_alias_resolves() -> None:
 
 def test_install_pins_harness_and_mimo_cli_no_vendor_harness() -> None:
     cmd = _install_cmd()
-    assert "@ai-sdk/harness@canary" in cmd
+    # Exact canary pin (no floating @canary tag) — @ai-sdk/harness has no stable
+    # release; @mimo-ai/cli standardized at @0.1.1 across the MiMo packages.
+    assert "@ai-sdk/harness@1.0.0-canary." in cmd
+    assert "@ai-sdk/harness@canary" not in cmd
     assert "@mimo-ai/cli@0.1.1" in cmd
     # MiMo is its own ACP agent — no vendor @ai-sdk/harness-<x> and no sandbox lib.
     assert "@ai-sdk/harness-pi" not in cmd

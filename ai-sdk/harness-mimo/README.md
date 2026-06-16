@@ -28,8 +28,9 @@ await SDK().run(task_path="...", agent="ai-sdk-mimo", model="mimo/mimo-auto", us
 
 ## How it works
 - `register.py` registers `ai-sdk-mimo` (`protocol="acp"`, `api_protocol="openai-completions"`,
-  `acp_model_format="bare"`); `install_cmd` installs `@ai-sdk/harness@canary` + `@mimo-ai/cli@0.1.1`
-  into an isolated node prefix; `launch_cmd` runs `node server.mjs`.
+  `acp_model_format="bare"`); `install_cmd` installs `@ai-sdk/harness@1.0.0-canary.13`
+  (exact canary pin — no stable release) + `@mimo-ai/cli@0.1.1` into an isolated node
+  prefix; `launch_cmd` runs `node server.mjs`.
 - `server.mjs` builds `new HarnessAgent({ harness: createMimo(...), sandbox: <host-fs> })`, maps
   the agent's `fullStream` → ACP `session/update`, and bridges task files ⇄ MiMo's per-session
   workdir (seed in / sync back) so the verifier sees outputs.

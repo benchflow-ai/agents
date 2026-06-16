@@ -273,8 +273,11 @@ function createHostFsSandbox(root) {
 // ── outer ACP server (benchflow <-> this process) ───────────────────────────
 async function ensureSession() {
   if (harnessSession) return cachedAgent;
-  // Usage-off path: MiMo gets raw provider creds + the bare model id. Free
-  // mimo/mimo-auto needs none; xiaomi/* reads its config (mimocode.json) or env.
+  // Usage-off path: MiMo gets the gateway creds (OPENAI_*) + the bare model id.
+  // The free mimo/mimo-auto channel needs no creds (this package's validated
+  // path). The flagship xiaomi/* native route (a mimocode.json credential file +
+  // provider/model ids) belongs to the benchflow-core `mimo` agent — this
+  // package wires only OPENAI_*, not a mimocode.json.
   const env = {};
   const base = process.env.OPENAI_BASE_URL || process.env.OPENROUTER_BASE_URL;
   const key = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;

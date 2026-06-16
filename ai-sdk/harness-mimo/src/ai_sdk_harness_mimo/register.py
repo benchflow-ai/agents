@@ -30,7 +30,12 @@ _SERVER_SOURCE = (Path(__file__).parent / "server.mjs").read_text()
 # @ai-sdk/harness pulls `ai`; @mimo-ai/cli provides the native `mimo` binary +
 # `mimo acp`. No @ai-sdk/harness-<x> (no vendor harness) and no sandbox lib
 # (the adapter ships its own host-fs HarnessV1SandboxProvider).
-_DEPS = ("@ai-sdk/harness@canary", "@mimo-ai/cli@0.1.1")
+# @ai-sdk/harness is published ONLY under the `canary` dist-tag (no stable
+# release yet); pin an EXACT canary version for reproducible installs rather
+# than the floating `@canary` tag (which would silently move). @mimo-ai/cli is
+# standardized at @0.1.1 across the agents-repo MiMo packages.
+_AI_SDK_HARNESS = "@ai-sdk/harness@1.0.0-canary.13"
+_DEPS = (_AI_SDK_HARNESS, "@mimo-ai/cli@0.1.1")
 _ALIASES = ("ai-sdk-harness-mimo", "mimo-harness")
 
 
