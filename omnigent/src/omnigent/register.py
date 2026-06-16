@@ -429,7 +429,13 @@ def register_mimo():
         install_cmd=MIMO_INSTALL_CMD,
         launch_cmd="omnigent run --harness mimo",
         protocol="session-factory",
-        default_model="",
+        # The free `mimo/mimo-auto` channel is the default — reachable here because
+        # the bare id is sent natively to `mimo acp` (bypassing benchflow provider
+        # resolution, where it would 400). NOTE: omnigent-mimo must run
+        # `usage_tracking="off"` (MiMo rejects the LiteLLM proxy alias); a no-arg
+        # call therefore also needs usage_tracking=off. The flagship
+        # `xiaomi/mimo-v2.5-pro` is opportunistic (XIAOMI_API_KEY/BASE_URL).
+        default_model="mimo/mimo-auto",
         api_protocol="openai-completions",
         # MiMo routes via HARNESS_MIMO_* env on the `omnigent run` line (set by
         # OmnigentSession from the resolved provider routing) — identity
