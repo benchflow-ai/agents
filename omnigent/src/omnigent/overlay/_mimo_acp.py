@@ -43,7 +43,11 @@ from typing import Any, AsyncIterator
 logger = logging.getLogger(__name__)
 
 # MiMo's free, no-account, headless channel — the default gating/verification
-# model (needs no API key, validated working in-sandbox). The flagship
+# model for the omnigent-mimo NON-PROXY path (usage_tracking=off): the bare id is
+# sent straight to `mimo acp set_model`, so it reaches MiMo's native catalog and
+# needs no key (validated live in-sandbox, reward 1.0 on citation-check). It is
+# NOT portable to benchflow's proxy/provider-resolution path, where `mimo` is not
+# a registered provider (it 400s — see benchflow #679). The flagship
 # ``xiaomi/mimo-v2.5-pro`` is opportunistic and key/quota-gated.
 DEFAULT_MODEL = "mimo/mimo-auto"
 
