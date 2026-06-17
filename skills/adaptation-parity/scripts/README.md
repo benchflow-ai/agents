@@ -7,9 +7,12 @@
 - **`acp_capture.mjs`** — drives an agent's ACP `server.mjs` through one prompt
   against the mock, and records the upstream requests + tool calls + file written.
   Use for the **standalone** half of a parity check.
-- **`parity_diff.py`** — normalizes expected-neutral differences and diffs two
-  upstream-request logs (`outside.jsonl` vs `inside.jsonl`); exits non-zero on a
-  real divergence.
+- **`parity.py`** — the reusable, importable comparator a per-agent pytest calls:
+  `assert_wire_parity(expected, actual)`, `compare_outcomes(...)`, `load_capture(path)`,
+  plus the explicit `NEUTRAL_DIFFS` allowlist (load-bearing — the rule registry drives
+  `normalize_request`).
+- **`parity_diff.py`** — a thin CLI over `parity.py`: diffs two upstream-request logs
+  (`outside.jsonl` vs `inside.jsonl`); exits non-zero on a real divergence.
 - **`scaffold_ai_sdk_agent.py`** — scaffold a new adapter package from `ai-sdk/acp`.
 
 ## Wire-parity check (inside == outside)
