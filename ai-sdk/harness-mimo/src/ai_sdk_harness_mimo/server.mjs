@@ -135,7 +135,6 @@ function makeAcpClient(child) {
     reply(id, result) { write({ jsonrpc: "2.0", id, result }); },
     onNotification(h) { notifyHandlers.add(h); },
     onServerRequest(h) { serverRequestHandlers.add(h); },
-    isDead: () => dead,
   };
 }
 function textOf(content) {
@@ -188,7 +187,14 @@ async function createMimoSession({ startOpts, settings }) {
       }, null, 2));
       innerModel = "benchflow/" + alias;
       log("proxy mode: wrote custom provider, inner model =", innerModel);
-    } catch (e) { log("proxy provider write failed (falling back to native):", String(e).slice(0, 160)); }
+    } catch (e) {
+      // Fail loud: silently falling back to the bare alias would let mimo reject
+      // it via models.dev (or route off-proxy), losing the raw-LLM trajectory and
+      // provider_response usage the proxy run depends on. A clear error surfaces
+      // the broken proxy wiring instead of producing a misleading "native" run.
+      log("proxy provider write FAILED:", String(e).slice(0, 200));
+      throw new Error("proxy mode: could not write .mimocode/mimocode.json: " + String(e));
+    }
   }
   const child = spawn(MIMO_BIN, ["acp", "--cwd", cwd], {
     stdio: ["pipe", "pipe", "pipe"],

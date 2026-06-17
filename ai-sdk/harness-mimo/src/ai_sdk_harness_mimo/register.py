@@ -8,10 +8,16 @@ Unlike ``harness-pi``/``-codex``/``-claude-code`` there is no vendor
 ``@ai-sdk/harness-<x>`` package and no JS-library agent loop: MiMo *is* the ACP
 agent, so the adapter only bridges its protocol into the AI SDK stream.
 
-Run with ``usage_tracking="off"`` (see README): MiMo (an OpenCode fork) rejects
-the LiteLLM proxy's model alias, so the proxy is bypassed and the agent gets the
-raw provider creds + bare model id; usage is captured natively via
-``agent_native_acp`` (MiMo's ACP ``PromptResult.usage``). The free
+Both usage modes work (see README). In **proxy mode** (``usage_tracking`` auto/
+required, the default) benchflow points ``OPENAI_BASE_URL`` at its LiteLLM usage
+proxy and passes a ``benchflow-*`` model alias; MiMo (an OpenCode fork) would
+reject an unknown alias via ``models.dev``, so ``createMimoSession`` writes a
+per-session ``.mimocode/mimocode.json`` registering an OpenAI-compatible custom
+provider ``benchflow`` at the proxy and sets the inner model to
+``benchflow/<alias>`` — the turn routes THROUGH the proxy, which captures the raw
+LLM trajectory and reports ``usage_source=provider_response``. In **usage-off
+mode** no proxy is set, so MiMo gets the raw provider creds + bare model id and
+usage is captured natively via the ACP ``PromptResult.usage``; the free
 ``mimo/mimo-auto`` model needs no key.
 """
 
@@ -83,7 +89,9 @@ def register() -> None:
         description=(
             "Vercel AI SDK 7 HarnessAgent driving MiMo Code's native `mimo acp` "
             "(OpenCode fork) — thin custom HarnessV1 adapter, no server.mjs-side "
-            "agent loop; run with usage_tracking=off (free mimo/mimo-auto needs no key)"
+            "agent loop; proxy mode (default) routes through the LiteLLM usage "
+            "proxy via a custom provider (provider_response usage); usage_tracking="
+            "off uses native ACP usage (free mimo/mimo-auto needs no key)"
         ),
     )
     for alias in _ALIASES:
