@@ -26,6 +26,9 @@ packages = ["src/ai_sdk_harness_mimo"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: behavioural subprocess tests that spawn the real server.mjs (skipped if node/deps absent)",
+]
 
 [tool.ruff]
 src = ["src", "tests"]

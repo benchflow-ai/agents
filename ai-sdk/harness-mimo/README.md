@@ -15,14 +15,28 @@ vendor harness package, no JS-library wrap, no WebSocket bridge (~150-line adapt
 benchflow ──ACP/stdio──▶ server.mjs (HarnessAgent) ──ACP/stdio──▶ mimo acp (native)
 ```
 
-## Run with `usage_tracking="off"`
-MiMo (OpenCode fork) rejects the LiteLLM proxy's model alias, so the proxy is bypassed and the
-agent gets raw provider creds + the bare model id; usage is captured natively via the ACP
-`PromptResult.usage`. The free `mimo/mimo-auto` model needs no key.
+## Usage tracking
+Both modes work — the agent picks the route from `OPENAI_BASE_URL` at session start:
+
+- **Proxy mode** (`usage_tracking="auto"`/`"required"`, the default): benchflow points
+  `OPENAI_BASE_URL` at its LiteLLM usage proxy and passes the model as a `benchflow-*` alias.
+  MiMo (an OpenCode fork) rejects an unknown alias via `models.dev` — *unless* it belongs to a
+  **custom provider**. So `createMimoSession` writes a per-session `.mimocode/mimocode.json`
+  registering an OpenAI-compatible provider `benchflow` pointed at the proxy, then sends the
+  inner ACP `session/set_model` as `benchflow/<alias>`. MiMo POSTs to the proxy, which captures
+  `trajectory/llm_trajectory.jsonl` (raw prompts/completions) and reports
+  `usage_source=provider_response`. This is the path the merge-readiness eval exercises.
+- **Usage-off mode** (`usage_tracking="off"`): no proxy is set, so MiMo gets the raw provider
+  creds + the bare model id and usage is captured natively via the ACP `PromptResult.usage`.
+  The free `mimo/mimo-auto` model needs no key.
 
 ```python
 import ai_sdk_harness_mimo  # registers `ai-sdk-mimo` (aliases: ai-sdk-harness-mimo, mimo-harness)
 from benchflow import SDK
+
+# proxy mode (raw-LLM trajectory + provider_response usage)
+await SDK().run(task_path="...", agent="ai-sdk-mimo", model="deepseek/deepseek-v4-flash")
+# usage-off mode (free model, native ACP usage)
 await SDK().run(task_path="...", agent="ai-sdk-mimo", model="mimo/mimo-auto", usage_tracking="off")
 ```
 
