@@ -15,7 +15,7 @@ import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import {
   cpSync, readdirSync, mkdirSync, mkdtempSync, existsSync,
-  createReadStream,
+  createReadStream, writeFileSync,
 } from "node:fs";
 import * as fsp from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -25,6 +25,21 @@ import { HarnessAgent, HarnessCapabilityUnsupportedError } from "@ai-sdk/harness
 
 for (const k of ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
                  "NO_PROXY", "no_proxy", "NODE_TLS_REJECT_UNAUTHORIZED"]) delete process.env[k];
+
+// The mimo CLI launcher is `#!/usr/bin/env node`; the sandbox launch invokes
+// us by absolute node path with node NOT on PATH (only /opt/benchflow/node/bin
+// has it, no system node), so the launcher's shebang fails — `env: node: not
+// found` → the child exits 127 → 0 tokens/0 tools → suspected_api_error. Put
+// our own node dir on PATH so every child we spawn (mimo + bash tools) finds it.
+process.env.PATH = dirname(process.execPath) + (process.env.PATH ? ":" + process.env.PATH : "");
+
+// Belt-and-suspenders: a long-lived ACP server must ALWAYS return a result to
+// benchflow rather than let a stray async error (e.g. an EPIPE from a dead inner
+// child) exit the process mid-turn — a crashed transport nulls the whole run. The
+// targeted child-death handling in makeAcpClient prevents these; this only
+// guarantees no late/stray rejection ever takes the process down.
+process.on("uncaughtException", (e) => log("uncaughtException (ignored):", String((e && e.stack) || e)));
+process.on("unhandledRejection", (e) => log("unhandledRejection (ignored):", String((e && e.stack) || e)));
 
 const MIMO_BIN = process.env.MIMO_BIN
   || join("/opt/benchflow/js-agents/ai-sdk-mimo", "node_modules", ".bin", "mimo");
@@ -39,10 +54,16 @@ let modelId = process.env.BENCHFLOW_PROVIDER_MODEL || "";
 let harnessSession = null, sessionDir = null, currentAbort = null, cachedAgent = null;
 
 const isMimoDir = (n) => /^mimo-/.test(n);
+// `.daytona` is Daytona's root-owned per-sandbox infra dir living in the task
+// cwd; copying it into the session dir makes mimo's own session writes fail with
+// EACCES under the non-root sandbox agent user. Skip it (mimo creates a fresh,
+// writable one). Per-entry try/catch so one un-copyable entry can't abort seeding.
+const SKIP_SEED = new Set([".daytona"]);
 const seedIntoSession = () => {                       // task files -> session dir
   for (const e of readdirSync(agentCwd, { withFileTypes: true })) {
-    if (isMimoDir(e.name) || e.isSymbolicLink()) continue;
-    cpSync(join(agentCwd, e.name), join(sessionDir, e.name), { recursive: true });
+    if (isMimoDir(e.name) || e.isSymbolicLink() || SKIP_SEED.has(e.name)) continue;
+    try { cpSync(join(agentCwd, e.name), join(sessionDir, e.name), { recursive: true }); }
+    catch (err) { log("seed skip", e.name, String(err).slice(0, 120)); }
   }
 };
 const syncBackToCwd = () => {                          // agent results -> task cwd
@@ -56,9 +77,32 @@ const syncBackToCwd = () => {                          // agent results -> task 
 function makeAcpClient(child) {
   let buf = "";
   let nextId = 1;
+  let dead = false;
   const pending = new Map();
   const notifyHandlers = new Set();
   const serverRequestHandlers = new Set();
+  // Reject every in-flight request the moment the `mimo acp` child dies. A
+  // mid-turn death (OOM-kill in the 2GB sandbox, crash, lost egress) otherwise
+  // leaves session/prompt awaiting forever (hang) AND lets a later stdin write
+  // EPIPE-crash this process (rc=255) — both null the benchflow run. Mirrors the
+  // omnigent _mimo_acp.py _fail_pending-on-EOF contract.
+  const failPending = (why) => {
+    if (dead) return;
+    dead = true;
+    const e = new Error("mimo acp child gone: " + why);
+    for (const [, pr] of pending) { try { pr.reject(e); } catch {} }
+    pending.clear();
+  };
+  child.on("error", (e) => { log("mimo child error:", String(e)); failPending("child error: " + String(e)); });
+  child.on("exit", (code, sig) => { log(`mimo child exit code=${code} sig=${sig}`); failPending(`exited code=${code} sig=${sig}`); });
+  child.stdout.on("close", () => failPending("stdout closed"));
+  child.stdin.on("error", () => {});   // never let an EPIPE on the child pipe go unhandled
+  // A write that can never throw — a write to a dead child must not crash us.
+  const write = (obj, onFail) => {
+    if (dead || !child.stdin.writable) { if (onFail) onFail(new Error("mimo acp child not writable")); return false; }
+    try { child.stdin.write(JSON.stringify(obj) + "\n"); return true; }
+    catch (e) { failPending("write failed: " + String(e)); if (onFail) onFail(e); return false; }
+  };
   child.stdout.on("data", (d) => {
     buf += d;
     let i;
@@ -69,30 +113,31 @@ function makeAcpClient(child) {
       let m;
       try { m = JSON.parse(line); } catch { continue; }
       if (m.id != null && pending.has(m.id)) {
-        const p = pending.get(m.id); pending.delete(m.id);
-        m.error ? p.reject(new Error(JSON.stringify(m.error))) : p.resolve(m.result);
+        const pr = pending.get(m.id); pending.delete(m.id);
+        m.error ? pr.reject(new Error(JSON.stringify(m.error))) : pr.resolve(m.result);
       } else if (m.method && m.id != null) {
-        for (const h of serverRequestHandlers) h(m);
+        for (const h of serverRequestHandlers) { try { h(m); } catch (e) { log("server-req handler:", String(e)); } }
       } else if (m.method) {
-        for (const h of notifyHandlers) h(m);
+        for (const h of notifyHandlers) { try { h(m); } catch (e) { log("notify handler:", String(e)); } }
       }
     }
   });
   return {
     request(method, params) {
-      const id = nextId++;
       return new Promise((resolve, reject) => {
+        if (dead) { reject(new Error("mimo acp child not available")); return; }
+        const id = nextId++;
         pending.set(id, { resolve, reject });
-        child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+        write({ jsonrpc: "2.0", id, method, params }, (e) => { pending.delete(id); reject(e); });
       });
     },
-    notify(method, params) { child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n"); },
-    reply(id, result) { child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n"); },
+    notify(method, params) { write({ jsonrpc: "2.0", method, params }); },
+    reply(id, result) { write({ jsonrpc: "2.0", id, result }); },
     onNotification(h) { notifyHandlers.add(h); },
     onServerRequest(h) { serverRequestHandlers.add(h); },
+    isDead: () => dead,
   };
 }
-
 function textOf(content) {
   if (content == null) return "";
   if (typeof content === "string") return content;
@@ -117,6 +162,34 @@ function createMimo(settings = {}) {
 
 async function createMimoSession({ startOpts, settings }) {
   const cwd = startOpts.sessionWorkDir;
+  // Proxy mode (usage_tracking != off): benchflow points OPENAI_BASE_URL at its
+  // LiteLLM usage proxy and sends the model as the `benchflow-*` alias. mimo
+  // rejects that id via models.dev — UNLESS it is a custom provider. So register
+  // a custom OpenAI-compatible provider "benchflow" at the proxy and route the
+  // turn as `benchflow/<alias>`; mimo then POSTs to the proxy, which captures
+  // trajectory/llm_trajectory.jsonl (raw prompts/completions + per-request tokens).
+  let innerModel = settings.model;
+  const proxyBase = process.env.OPENAI_BASE_URL;
+  if (proxyBase && settings.model) {
+    const alias = settings.model.includes("/") ? settings.model.split("/").pop() : settings.model;
+    try {
+      const cfgDir = join(cwd, ".mimocode");
+      mkdirSync(cfgDir, { recursive: true });
+      writeFileSync(join(cfgDir, "mimocode.json"), JSON.stringify({
+        "$schema": "https://opencode.ai/config.json",
+        provider: {
+          benchflow: {
+            npm: "@ai-sdk/openai-compatible",
+            name: "BenchFlow Proxy",
+            options: { baseURL: proxyBase, apiKey: process.env.OPENAI_API_KEY || "benchflow" },
+            models: { [alias]: { name: alias } },
+          },
+        },
+      }, null, 2));
+      innerModel = "benchflow/" + alias;
+      log("proxy mode: wrote custom provider, inner model =", innerModel);
+    } catch (e) { log("proxy provider write failed (falling back to native):", String(e).slice(0, 160)); }
+  }
   const child = spawn(MIMO_BIN, ["acp", "--cwd", cwd], {
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, ...(settings.env ?? {}) },
@@ -130,7 +203,7 @@ async function createMimoSession({ startOpts, settings }) {
   const ns = await rpc.request("session/new", { cwd, mcpServers: [] });
   const acpSid = ns.sessionId;
   if (settings.model) {
-    try { await rpc.request("session/set_model", { sessionId: acpSid, modelId: settings.model }); }
+    try { await rpc.request("session/set_model", { sessionId: acpSid, modelId: innerModel }); }
     catch (e) { log("inner set_model failed, using default:", String(e).slice(0, 160)); }
   }
   // Auto-allow permission prompts (the dedicated sandbox is the isolation boundary).
@@ -204,7 +277,14 @@ async function createMimoSession({ startOpts, settings }) {
         const usage = mapUsage(res.usage);
         emit({ type: "finish-step", finishReason, usage });
         emit({ type: "finish", finishReason, totalUsage: usage });
-      } catch (e) { emit({ type: "error", error: e }); }
+      } catch (e) {
+        for (const id of openText) { try { emit({ type: "text-end", id }); } catch {} }
+        for (const id of openReasoning) { try { emit({ type: "reasoning-end", id }); } catch {} }
+        emit({ type: "error", error: e });
+        const finishReason = { unified: "other", raw: "error" };
+        emit({ type: "finish-step", finishReason, usage: mapUsage({}) });
+        emit({ type: "finish", finishReason, totalUsage: mapUsage({}) });
+      }
       finally { currentEmit = null; }
     })();
     if (abortSignal) abortSignal.addEventListener("abort", () => {
