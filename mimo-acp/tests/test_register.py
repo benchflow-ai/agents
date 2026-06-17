@@ -19,9 +19,11 @@ def test_register_wires_mimo_native_acp() -> None:
     # Usage-capture for gateway-routed models lands in OPENAI_*; the free
     # mimo/mimo-auto channel needs no key.
     assert cfg.api_protocol == "openai-completions"
-    # "bare" is required so the free mimo/mimo-auto id (no registered provider)
-    # passes through set_model unchanged to MiMo's native catalog.
-    assert cfg.acp_model_format == "bare"
+    # provider/model so benchflow's set_config_option(value) carries the
+    # "openai/<alias>" prefix the launcher's custom mimocode.json provider
+    # ("openai") matches; the bare alias alone yields ProviderModelNotFound and
+    # zero LLM requests. The free mimo/mimo-auto id (no slash) is unaffected.
+    assert cfg.acp_model_format == "provider/model"
     assert cfg.supports_acp_set_model is True
 
 
@@ -37,10 +39,49 @@ def test_install_pins_mimo_cli_no_server_mjs() -> None:
     assert "server.mjs" not in cmd
 
 
+def _decode_launcher(cmd: str) -> str:
+    """The launch_cmd is a `printf '%s' '<b64>' | base64 -d > script && sh script`
+    pipeline (the base64 indirection survives benchflow's split()/join()
+    which-rewrite, which would otherwise shred a multi-line `sh -c` body). Decode
+    the embedded payload back to the real shell program the sandbox runs."""
+    import base64
+    import re
+
+    m = re.search(r"printf '%s' '([A-Za-z0-9+/=]+)'", cmd)
+    assert m, f"launch_cmd is not a printf|base64 pipeline: {cmd!r}"
+    return base64.b64decode(m.group(1)).decode()
+
+
 def test_launch_runs_mimo_acp() -> None:
     cmd = _launch_cmd()
-    assert _MIMO_BIN in cmd
-    assert cmd.strip().endswith("acp")  # `... mimo acp` — the native ACP server
+    # The which-rewrite splits on whitespace and rejoins; the payload + the
+    # printf|base64 wrapper must contain no internal whitespace runs that would
+    # be collapsed, so the shell metacharacters survive intact.
+    assert " | base64 -d > " in cmd and cmd.strip().endswith("sh /tmp/mimo-acp-launch.sh")
+    body = _decode_launcher(cmd)
+    # decoded body execs the native mimo acp server (mimo IS the ACP server)
+    assert _MIMO_BIN in body
+    assert body.strip().endswith("acp")
+
+
+def test_launch_writes_proxy_provider_in_proxy_mode() -> None:
+    """In proxy mode the decoded launcher must register a custom OpenAI-compatible
+    provider under the key `openai` (the prefix benchflow emits for benchflow-*
+    aliases via set_config_option) pointed at $OPENAI_BASE_URL and keyed by the
+    bare alias, then neutralise the colliding OPENAI_* env. Otherwise mimo throws
+    ProviderModelNotFoundError and the turn captures zero raw-LLM requests."""
+    body = _decode_launcher(_launch_cmd())
+    # writes a mimocode.json gated on OPENAI_BASE_URL + the alias being present
+    assert "mimocode.json" in body
+    assert "OPENAI_BASE_URL" in body and "BENCHFLOW_LITELLM_MODEL_ALIAS" in body
+    # the custom provider key is `openai` so `openai/<alias>` resolves
+    assert '"openai"' in body and "@ai-sdk/openai-compatible" in body
+    assert "BenchFlow Proxy" in body
+    # the built-in openai provider auto-activates from OPENAI_* env and would
+    # collide with the redefine, so the launcher unsets them before exec
+    assert "unset OPENAI_BASE_URL OPENAI_API_KEY" in body
+    # the model id baked into the config is openai/<alias>
+    assert "openai/$A" in body or '"model": "openai/' in body
 
 
 def test_env_mapping_routes_openai_compatible() -> None:
