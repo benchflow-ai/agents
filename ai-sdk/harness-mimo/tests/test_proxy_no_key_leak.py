@@ -160,15 +160,44 @@ def test_proxy_key_never_lands_on_disk(tmp_path: Path) -> None:
         proc.stdin.flush()
 
     try:
-        send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-              "params": {"protocolVersion": 1, "clientCapabilities": {
-                  "fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False}}})
-        send({"jsonrpc": "2.0", "id": 2, "method": "session/new",
-              "params": {"cwd": str(work), "mcpServers": []}})
-        send({"jsonrpc": "2.0", "id": 3, "method": "session/set_model",
-              "params": {"modelId": "deepseek/deepseek-v4-flash"}})
-        send({"jsonrpc": "2.0", "id": 4, "method": "session/prompt",
-              "params": {"prompt": [{"type": "text", "text": "find fake citations"}]}})
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": 1,
+                    "clientCapabilities": {
+                        "fs": {"readTextFile": False, "writeTextFile": False},
+                        "terminal": False,
+                    },
+                },
+            }
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/new",
+                "params": {"cwd": str(work), "mcpServers": []},
+            }
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/set_model",
+                "params": {"modelId": "deepseek/deepseek-v4-flash"},
+            }
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "session/prompt",
+                "params": {"prompt": [{"type": "text", "text": "find fake citations"}]},
+            }
+        )
 
         # block until the prompt turn completes — that is when syncBackToCwd has run.
         assert _wait_for_result(proc, 4, time.time() + 25), (
