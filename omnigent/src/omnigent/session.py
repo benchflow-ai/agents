@@ -46,7 +46,6 @@ lockstep with :mod:`benchflow.trajectories._capture`.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shlex
@@ -143,16 +142,10 @@ class OmnigentSession:
         *,
         model: str | None,
         exec_user: str = "root",
-        harness: str = "pi",
     ) -> None:
         self._sandbox = sandbox
         self._model = model
         self._exec_user = exec_user
-        # ``"pi"`` (omnigent-pi) or ``"mimo"`` (omnigent-mimo). Selects the
-        # ``omnigent run --harness <harness>`` value; the mimo path also routes
-        # the model + cwd via HARNESS_MIMO_* env and sources the gateway-cred
-        # file written by ``OmnigentAgent.connect``.
-        self._harness = harness
         self._ask_user_handler: AskUserHandler | None = None
         # Flat trajectory in the canonical on-disk event shape — see
         # benchflow.trajectories._capture._events_to_trajectory.
@@ -160,32 +153,6 @@ class OmnigentSession:
         # Assignable by the kernel (Rollout._attach_trajectory_writer). Called
         # with ``self`` after every appended event so a writer streams to disk.
         self.on_change: Callable[[OmnigentSession], None] | None = None
-        # MiMo trackability bridge: the in-sandbox MimoExecutor writes each turn's
-        # tool calls + native ACP usage to this file; ``prompt`` reads it back to
-        # emit ``tool_call`` events and accumulate cumulative usage, which the
-        # rollout collects via ``latest_usage_totals``. This is what surfaces tool
-        # use + tokens on the free ``usage_tracking=off`` channel, where MiMo
-        # talks straight to its own endpoint and the BenchFlow usage proxy never
-        # sees the traffic. In proxy mode (``usage_tracking != off``) the proxy
-        # ALSO captures the raw exchanges directly, but the trace keeps the
-        # trajectory tool-step-auditable either way. Without it, a free-channel
-        # mimo run shows zero tokens AND zero tool calls and BenchFlow nulls the
-        # reward as a suspected API error.
-        #
-        # This is a SANDBOX-LOCAL path and MUST equal mimo_harness.DEFAULT_TRACE_PATH:
-        # omnigent's `run` daemon spawns the harness with the daemon's env (NOT the
-        # `omnigent run` CLI env), so HARNESS_MIMO_TRACE set on the CLI line does
-        # not reach the harness — the path has to be agreed out-of-band, not via
-        # env. A fixed path is safe because each rollout owns its sandbox (one
-        # session per sandbox) and ``prompt`` truncates it before every turn.
-        self._mimo_trace_path = "/tmp/omnigent-mimo-trace.json"
-        self._usage_totals: dict[str, int] = {}
-        # Tool calls observed this rollout. Mirrors ``ACPSession.tool_calls`` (the
-        # public mutable list the session-factory rollout reads via
-        # ``len(session.tool_calls)`` to count ``n_tool_calls``) — populated from
-        # the MiMo trace so the count reflects MiMo's native tool use. omnigent-pi
-        # has no such list, which is why its trajectories report ``n_tool_calls=0``.
-        self.tool_calls: list[dict] = []
 
     # ── Session Protocol ──────────────────────────────────────────────
 
@@ -206,29 +173,10 @@ class OmnigentSession:
         # stale per-harness server left by a prior turn. ``omnigent run`` is the
         # one-shot turn (``-p`` exits after a single turn, no REPL). cwd=/app so
         # output files land where the verifier reads.
-        #
-        # MiMo harness path: source the gateway-cred env file (written by
-        # connect; absent/empty on the free mimo/mimo-auto channel) so the API
-        # key never appears in argv, and set the non-secret HARNESS_MIMO_CWD /
-        # HARNESS_MIMO_MODEL inline. These reach mimo_harness.create_app() because
-        # the harness subprocess inherits the `omnigent run` process env.
-        mimo_prefix = ""
-        if self._harness == "mimo":
-            trace = shlex.quote(self._mimo_trace_path)
-            mimo_env_exports = (
-                'set -a; . "$HOME/.omnigent/mimo.env" 2>/dev/null || true; set +a; '
-                f"rm -f {trace}; "  # clear any stale trace before this turn
-                f"export HARNESS_MIMO_TRACE={trace}; "
-                f"export HARNESS_MIMO_CWD={shlex.quote(_WORKSPACE)}; "
-            )
-            if model:
-                mimo_env_exports += f"export HARNESS_MIMO_MODEL={shlex.quote(model)}; "
-            mimo_prefix = mimo_env_exports
         cmd = (
             f"cd {shlex.quote(_WORKSPACE)} && "
-            f"{mimo_prefix}"
             f"omnigent stop >/dev/null 2>&1; "
-            f"omnigent run --harness {shlex.quote(self._harness)} --model {shlex.quote(model)} "
+            f"omnigent run --harness pi --model {shlex.quote(model)} "
             f"-p {shlex.quote(text)}"
         )
 
@@ -244,15 +192,6 @@ class OmnigentSession:
                 {"type": "agent_message", "text": f"[error] omnigent run failed: {e}"}
             )
             return StopReason.END_TURN
-
-        # MiMo trackability: on a SUCCESSFUL run, read the in-sandbox trace and
-        # emit ``tool_call`` events (so n_tool_calls > 0) + accumulate native usage
-        # BEFORE the final agent_message, giving a sensibly ordered, step-auditable
-        # trajectory. Skip on a non-zero exit — the trace may be partial, missing,
-        # or (if the run never reached the executor) stale from a prior turn, and
-        # ingesting it would attribute the previous turn's tools/usage to this one.
-        if self._harness == "mimo" and result.return_code == 0:
-            await self._ingest_mimo_trace()
 
         final = _final_agent_line(result.stdout)
         if final:
@@ -273,103 +212,6 @@ class OmnigentSession:
             )
 
         return StopReason.END_TURN
-
-    async def _ingest_mimo_trace(self) -> None:
-        """Read the MiMo turn's tool/usage sidecar and fold it into the trajectory.
-
-        The in-sandbox :class:`MimoExecutor` wrote ``HARNESS_MIMO_TRACE`` as one
-        JSON object ``{"tools": [...], "usage": {...}}``. We emit one canonical
-        ``tool_call`` event per tool (``type``/``tool_call_id``/``kind``/``title``/
-        ``status``/``content`` — the shape BenchFlow's metrics count), mirror them
-        into ``self.tool_calls`` (the count the rollout reads), and add the turn's
-        native ACP usage to the cumulative ``latest_usage_totals`` snapshot.
-
-        Only called after a zero-exit run, so a missing/empty trace here means the
-        in-sandbox executor could not write it (e.g. a full ``/tmp``) — that is
-        surfaced as a visible ``agent_message`` rather than silently degrading to
-        zero-activity (which BenchFlow would otherwise misdiagnose as an API
-        error). A read/parse failure never raises — the turn's files already landed.
-        """
-        try:
-            read = await self._sandbox.exec(
-                f"cat {shlex.quote(self._mimo_trace_path)} 2>/dev/null || true",
-                user=self._exec_user,
-                timeout_sec=30,
-            )
-        except Exception as e:  # pragma: no cover - best-effort
-            logger.warning(f"OmnigentSession: reading mimo trace failed: {e}")
-            return
-
-        raw = (read.stdout or "").strip()
-        if not raw:
-            # The run succeeded but the executor wrote no trace — make the gap
-            # visible (and non-empty trajectory) instead of letting it read as a
-            # silent zero-activity (suspected) API error.
-            logger.error(
-                "OmnigentSession: mimo run succeeded but wrote no trace at %s — "
-                "tool/usage tracking degraded for this turn",
-                self._mimo_trace_path,
-            )
-            self._emit(
-                {
-                    "type": "agent_message",
-                    "text": "[warning] mimo trace unavailable — tool/usage "
-                    "tracking degraded for this turn",
-                }
-            )
-            return
-        try:
-            trace = json.loads(raw)
-        except (ValueError, TypeError) as e:
-            logger.warning(f"OmnigentSession: mimo trace not valid JSON: {e}")
-            return
-
-        for tool in trace.get("tools") or []:
-            if not isinstance(tool, dict):
-                continue
-            name = str(tool.get("name") or "tool")
-            event = {
-                "type": "tool_call",
-                "tool_call_id": str(tool.get("id") or ""),
-                "kind": name,
-                "title": name,
-                "status": "error" if tool.get("is_error") else "completed",
-                "content": tool.get("result"),
-            }
-            self.tool_calls.append(event)  # the count the rollout reads
-            self._emit(event)
-
-        usage = trace.get("usage")
-        if isinstance(usage, dict):
-            self._accumulate_usage(usage)
-
-    def _accumulate_usage(self, usage: dict) -> None:
-        """Add a turn's MiMo usage onto the cumulative ``latest_usage_totals`` snapshot."""
-        for key in (
-            "input_tokens",
-            "output_tokens",
-            "total_tokens",
-            "cache_read_input_tokens",
-        ):
-            value = usage.get(key)
-            if isinstance(value, int):
-                self._usage_totals[key] = self._usage_totals.get(key, 0) + value
-
-    def latest_usage_totals(self) -> dict[str, int] | None:
-        """Cumulative native token usage for the rollout's usage collector.
-
-        BenchFlow's session rollout reads this (``_collect_native_acp_usage`` →
-        ``getattr(session, "latest_usage_totals")``) to attribute tokens on the
-        free ``usage_tracking=off`` channel (``mimo/mimo-auto``), where MiMo
-        talks straight to its own free endpoint and the BenchFlow usage proxy
-        never sees the traffic. In proxy mode (``usage_tracking != off``) MiMo is
-        instead pointed at the proxy via a custom OpenAI-compatible provider (see
-        ``MimoAcp.start``), so the proxy captures the raw exchanges and tokens and
-        this native fallback simply stays empty. Returns ``None`` until a turn
-        reports usage so the collector skips cleanly (omnigent-pi has no such
-        method and is unaffected).
-        """
-        return dict(self._usage_totals) if self._usage_totals else None
 
     async def cancel(self) -> None:
         """Best-effort abort: stop any in-flight omnigent daemon in the sandbox."""
@@ -399,27 +241,8 @@ class OmnigentSession:
     # ── Lifecycle (called by OmnigentAgent / Rollout) ─────────────────
 
     async def close(self) -> None:
-        """Tear down the omnigent daemon + mimo session artifacts (best-effort)."""
+        """Tear down any lingering omnigent daemon in the sandbox (best-effort)."""
         await self.cancel()
-        if self._harness == "mimo":
-            # Remove every mimo secret-bearing artifact so nothing lingers in the
-            # sandbox after the session ends:
-            #   * the tool-name/result trace sidecar,
-            #   * the gateway-cred env file (raw API key), and
-            #   * the proxy-mode mimocode.json the in-sandbox MimoAcp writes into
-            #     the WORKSPACE (``/app/.mimocode/mimocode.json``) — it embeds the
-            #     resolved proxy OPENAI_API_KEY, so it must not survive into the
-            #     verified workspace.
-            mimocode_cfg = shlex.quote(f"{_WORKSPACE}/.mimocode/mimocode.json")
-            try:
-                await self._sandbox.exec(
-                    f"rm -f {shlex.quote(self._mimo_trace_path)} "
-                    f'{mimocode_cfg} "$HOME/.omnigent/mimo.env"',
-                    user=self._exec_user,
-                    timeout_sec=30,
-                )
-            except Exception as e:  # pragma: no cover - best-effort cleanup
-                logger.warning(f"OmnigentSession: mimo artifact cleanup failed: {e}")
 
     # ── Internal: trajectory emission ─────────────────────────────────
 

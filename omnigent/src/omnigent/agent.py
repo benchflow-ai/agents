@@ -101,50 +101,14 @@ def _build_config_yaml(*, base_url: str, api_key: str, model: str) -> str:
     )
 
 
-def _build_mimo_env_file(*, base_url: str, api_key: str, model: str = "") -> str:
-    """Render ``~/.omnigent/mimo.env`` — sourced by the mimo ``omnigent run`` shell.
-
-    Emits ``export HARNESS_MIMO_GATEWAY_BASE_URL=…`` / ``…_API_KEY=…`` for the
-    non-free (xiaomi/provider) path. Both empty on the free ``mimo/mimo-auto``
-    channel → a comment-only file (sourcing it is a clean no-op). Values are
-    single-quoted with embedded single-quotes escaped so a key with shell-special
-    characters can't break the document.
-    """
-
-    def _q(value: str) -> str:
-        return "'" + value.replace("'", "'\\''") + "'"
-
-    lines = ["# omnigent-mimo gateway env (sourced by `omnigent run --harness mimo`)"]
-    if base_url:
-        lines.append(f"export HARNESS_MIMO_GATEWAY_BASE_URL={_q(base_url)}")
-    if api_key:
-        lines.append(f"export HARNESS_MIMO_GATEWAY_API_KEY={_q(api_key)}")
-    # proxy mode: route the model via the file too (the daemon-spawned harness
-    # does not inherit the CLI env), so the executor uses the right model id.
-    if model:
-        lines.append(f"export HARNESS_MIMO_MODEL={_q(model)}")
-    return "\n".join(lines) + "\n"
-
-
 class OmnigentAgent:
-    """The Omnigent agent factory — implements the ``Agent`` Protocol.
+    """The Omnigent ``pi`` agent factory — implements the ``Agent`` Protocol."""
 
-    Drives either the ``pi`` harness (``omnigent-pi``, default) or the ``mimo``
-    harness (``omnigent-mimo``, the install-time overlay) — selected by the
-    ``harness`` constructor arg, which the session forwards to
-    ``omnigent run --harness <harness>``.
-    """
-
-    def __init__(self, *, exec_user: str = "root", harness: str = "pi") -> None:
+    def __init__(self, *, exec_user: str = "root") -> None:
         # The sandbox user that ``omnigent run`` executes as. ``connect`` writes
         # the credential store under this user's home and the session execs as
         # this user, so the two stay in lockstep.
         self._exec_user = exec_user
-        # Which Omnigent harness this agent drives — ``"pi"`` (omnigent-pi, the
-        # default) or ``"mimo"`` (omnigent-mimo, the install-time overlay). The
-        # session shells ``omnigent run --harness <harness>``; the mimo path also
-        # routes the model + gateway creds via ``HARNESS_MIMO_*`` env.
-        self._harness = harness
 
     def capabilities(self) -> AgentCapabilities:
         """Declare the non-ACP protocol + multi-turn (nudge) support.
@@ -229,35 +193,10 @@ class OmnigentAgent:
             self._exec_user,
         )
 
-        # MiMo harness path: route the model + gateway creds via HARNESS_MIMO_*
-        # env (the harness subprocess inherits os.environ). MiMo (an OpenCode
-        # fork) won't accept BenchFlow's models.dev `benchflow-*` id directly, so
-        # in proxy mode (usage_tracking != off) MimoAcp.start registers a custom
-        # OpenAI-compatible provider pointed at the proxy and routes the turn as
-        # `benchflow/<alias>` — the proxy then captures the raw exchanges and
-        # tokens. Write the gateway creds to a sourced env file rather than the
-        # `omnigent run` argv so the API key is never exposed in the sandbox
-        # process listing. The free `mimo/mimo-auto` channel needs no creds, so
-        # this file is harmless-empty there.
-        if self._harness == "mimo":
-            mimo_env = _build_mimo_env_file(
-                base_url=base_url, api_key=api_key, model=model
-            )
-            mimo_env_path = f"{home}/.omnigent/mimo.env"
-            mimo_b64 = base64.b64encode(mimo_env.encode("utf-8")).decode("ascii")
-            await sandbox.exec(
-                f"mkdir -p {shlex.quote(home + '/.omnigent')} && "
-                f"printf %s {shlex.quote(mimo_b64)} | base64 -d > {shlex.quote(mimo_env_path)} && "
-                f"chmod 600 {shlex.quote(mimo_env_path)}",
-                user=self._exec_user,
-                timeout_sec=30,
-            )
-
         return OmnigentSession(
             sandbox,
             model=model,
             exec_user=self._exec_user,
-            harness=self._harness,
         )
 
 
@@ -266,21 +205,8 @@ def build_omnigent_agent(**kwargs: Any) -> OmnigentAgent:
 
     Referenced from the registry as the dotted path
     ``omnigent.agent:build_omnigent_agent``. Accepts keyword overrides
-    (``exec_user``, ``harness``) for tests and direct programmatic use; the
-    production omnigent-pi path passes none and runs the ``pi`` harness as
-    ``root`` (the default sandbox exec user, whose home is ``/root``).
+    (currently ``exec_user``) for tests and direct programmatic use; the
+    production path passes none and runs as ``root`` (the default sandbox exec
+    user, whose home is ``/root``).
     """
-    return OmnigentAgent(**kwargs)
-
-
-def build_omnigent_mimo_agent(**kwargs: Any) -> OmnigentAgent:
-    """``session_factory`` entrypoint for ``omnigent-mimo`` (``--harness mimo``).
-
-    Pins ``harness="mimo"`` so the resolved agent drives the MiMo overlay; the
-    registry references this as ``omnigent.agent:build_omnigent_mimo_agent``
-    (distinct from :func:`build_omnigent_agent` so the kernel selects the harness
-    purely from which agent it resolved — no agent-name threading needed).
-    Explicit ``harness`` in ``kwargs`` still wins (test override).
-    """
-    kwargs.setdefault("harness", "mimo")
     return OmnigentAgent(**kwargs)
