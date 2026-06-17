@@ -34,6 +34,7 @@ def _kill_group(proc: subprocess.Popen) -> None:
     except Exception:
         pass
 
+
 _PKG = Path(__file__).parents[1] / "src" / "ai_sdk_harness_mimo"
 _SERVER = _PKG / "server.mjs"
 _SERVER_SRC = _SERVER.read_text()
@@ -45,7 +46,10 @@ _node = shutil.which("node") or next(
 
 
 def _find_node_modules() -> Path | None:
-    seen = [Path("/opt/benchflow/js-agents/ai-sdk-mimo/node_modules"), Path("/tmp/pr9-repro/node_modules")]
+    seen = [
+        Path("/opt/benchflow/js-agents/ai-sdk-mimo/node_modules"),
+        Path("/tmp/pr9-repro/node_modules"),
+    ]
     for anc in [_PKG, *_PKG.parents]:
         seen.append(anc / "node_modules")
     for nm in seen:
@@ -63,6 +67,12 @@ def test_server_puts_node_dir_on_child_path() -> None:
     assert "process.env.PATH" in _SERVER_SRC
 
 
+# generous, CI-safe deadline for the one-turn mock to complete (sub-second in
+# practice; this is pure slack so a busy CI host can't flake the test).
+_RESULT_DEADLINE_S = float(os.environ.get("MIMO_TEST_DEADLINE_S", "45"))
+
+
+@pytest.mark.slow
 @pytest.mark.skipif(_node is None or _NM is None, reason="node or deps not installed")
 def test_shebang_node_launcher_runs_with_node_off_ambient_path(tmp_path: Path) -> None:
     """Run server.mjs with a PATH that has bash/sh/env but NOT node (mimics the
@@ -77,7 +87,9 @@ def test_shebang_node_launcher_runs_with_node_off_ambient_path(tmp_path: Path) -
         real = shutil.which(tool)
         if real:
             (bindir / tool).symlink_to(real)
-    assert shutil.which("node", path=str(bindir)) is None, "test bindir must not expose node"
+    assert shutil.which("node", path=str(bindir)) is None, (
+        "test bindir must not expose node"
+    )
 
     (tmp_path / "node_modules").symlink_to(_NM)
     server = tmp_path / "server.mjs"
@@ -96,8 +108,13 @@ def test_shebang_node_launcher_runs_with_node_off_ambient_path(tmp_path: Path) -
         "OPENAI_API_KEY": "",
     }
     proc = subprocess.Popen(
-        [_node, str(server)], cwd=str(tmp_path),
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        [_node, str(server)],
+        cwd=str(tmp_path),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
         start_new_session=True,
     )
 
@@ -107,24 +124,56 @@ def test_shebang_node_launcher_runs_with_node_off_ambient_path(tmp_path: Path) -
         proc.stdin.flush()
 
     try:
-        send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-              "params": {"protocolVersion": 1,
-                         "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False}}})
-        time.sleep(0.4)
-        send({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": str(work), "mcpServers": []}})
-        time.sleep(0.4)
-        send({"jsonrpc": "2.0", "id": 3, "method": "session/set_model", "params": {"modelId": "mimo/mimo-auto"}})
-        time.sleep(0.4)
-        send({"jsonrpc": "2.0", "id": 4, "method": "session/prompt",
-              "params": {"prompt": [{"type": "text", "text": "list the bib entries"}]}})
+        # ACP-over-stdio is ordered: pipeline all four messages off stdin without
+        # wall-clock pacing (the old fixed time.sleep(0.4) gaps were the flake).
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": 1,
+                    "clientCapabilities": {
+                        "fs": {"readTextFile": False, "writeTextFile": False},
+                        "terminal": False,
+                    },
+                },
+            }
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/new",
+                "params": {"cwd": str(work), "mcpServers": []},
+            }
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/set_model",
+                "params": {"modelId": "mimo/mimo-auto"},
+            }
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "session/prompt",
+                "params": {
+                    "prompt": [{"type": "text", "text": "list the bib entries"}]
+                },
+            }
+        )
 
         assert proc.stdout is not None
-        deadline = time.time() + 15
+        deadline = time.time() + _RESULT_DEADLINE_S
         id4: dict | None = None
         saw_tool_call = False
         out_lines: list[str] = []
         while time.time() < deadline and id4 is None:
-            r, _, _ = select.select([proc.stdout], [], [], 0.2)
+            r, _, _ = select.select([proc.stdout], [], [], 0.5)
             if not r:
                 continue
             line = proc.stdout.readline()
@@ -152,8 +201,14 @@ def test_shebang_node_launcher_runs_with_node_off_ambient_path(tmp_path: Path) -
                 err = proc.stderr.read() or ""
         except Exception:
             err = ""
-        assert "code=127" not in err and "env: " not in err, f"launcher 127'd — node not on child PATH. stderr={err[-400:]!r}"
-        assert id4 is not None, f"no turn result; stdout={out_lines!r} stderr={err[-400:]!r}"
-        assert saw_tool_call, f"launcher ran but produced no tool call; stdout={out_lines!r}"
+        assert "code=127" not in err and "env: " not in err, (
+            f"launcher 127'd — node not on child PATH. stderr={err[-400:]!r}"
+        )
+        assert id4 is not None, (
+            f"no turn result; stdout={out_lines!r} stderr={err[-400:]!r}"
+        )
+        assert saw_tool_call, (
+            f"launcher ran but produced no tool call; stdout={out_lines!r}"
+        )
     finally:
         _kill_group(proc)

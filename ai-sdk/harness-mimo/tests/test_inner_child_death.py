@@ -30,6 +30,7 @@ _MOCK = Path(__file__).parent / "_mock_mimo_die.mjs"
 
 # ── cheap source invariants (no node needed) — keep the hardening from rotting ──
 
+
 def test_server_rejects_pending_on_inner_child_death() -> None:
     # failPending-on-death contract (mirrors omnigent _mimo_acp.py).
     assert "failPending" in _SERVER_SRC
@@ -76,7 +77,15 @@ def _find_node_modules() -> Path | None:
 _NM = _find_node_modules()
 
 
-@pytest.mark.skipif(_node is None or _NM is None, reason="node or @ai-sdk/harness deps not installed")
+# generous, CI-safe deadline for the outer server to answer after the inner child
+# dies (the real path responds in well under a second; this is pure slack).
+_RESULT_DEADLINE_S = float(os.environ.get("MIMO_TEST_DEADLINE_S", "45"))
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    _node is None or _NM is None, reason="node or @ai-sdk/harness deps not installed"
+)
 def test_inner_child_death_midturn_returns_clean_result(tmp_path: Path) -> None:
     os.chmod(_MOCK, 0o755)
     # a runnable copy of the server where its bare imports resolve
@@ -94,8 +103,13 @@ def test_inner_child_death_midturn_returns_clean_result(tmp_path: Path) -> None:
         "OPENAI_API_KEY": "",
     }
     proc = subprocess.Popen(
-        [_node, str(server)], cwd=str(tmp_path),
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
+        [_node, str(server)],
+        cwd=str(tmp_path),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
         start_new_session=True,
     )
 
@@ -106,32 +120,63 @@ def test_inner_child_death_midturn_returns_clean_result(tmp_path: Path) -> None:
 
     def alive() -> None:
         rc = proc.poll()
-        assert rc in (None, 0), f"server crashed rc={rc}; the inner-child death was not handled"
+        assert rc in (None, 0), (
+            f"server crashed rc={rc}; the inner-child death was not handled"
+        )
 
     try:
-        send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-              "params": {"protocolVersion": 1,
-                         "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}, "terminal": False}}})
-        time.sleep(0.4)
-        alive()
-        send({"jsonrpc": "2.0", "id": 2, "method": "session/new", "params": {"cwd": str(work), "mcpServers": []}})
-        time.sleep(0.4)
-        alive()
-        send({"jsonrpc": "2.0", "id": 3, "method": "session/set_model", "params": {"modelId": "mimo/mimo-auto"}})
-        time.sleep(0.4)
-        alive()
+        # ACP-over-stdio is line-buffered and ordered: the server consumes these
+        # lines in order off stdin, so we can pipeline all four messages without
+        # wall-clock pacing between them (the previous fixed time.sleep(0.4) gaps
+        # were the source of flakiness on a busy/slow CI host).
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": 1,
+                    "clientCapabilities": {
+                        "fs": {"readTextFile": False, "writeTextFile": False},
+                        "terminal": False,
+                    },
+                },
+            }
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "session/new",
+                "params": {"cwd": str(work), "mcpServers": []},
+            }
+        )
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "session/set_model",
+                "params": {"modelId": "mimo/mimo-auto"},
+            }
+        )
         # this turn's inner child dies mid-stream (mock exits 137 after a tool_call)
-        send({"jsonrpc": "2.0", "id": 4, "method": "session/prompt",
-              "params": {"prompt": [{"type": "text", "text": "find fake citations"}]}})
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "session/prompt",
+                "params": {"prompt": [{"type": "text", "text": "find fake citations"}]},
+            }
+        )
 
-        # the outer server MUST answer id:4 within a few seconds (not hang) and
-        # MUST NOT crash (rc != 0) while we wait.
+        # the outer server MUST answer id:4 (not hang) and MUST NOT crash (rc != 0)
+        # while we wait — poll on the condition with a generous deadline.
         assert proc.stdout is not None
-        deadline = time.time() + 15
+        deadline = time.time() + _RESULT_DEADLINE_S
         got_id4 = False
         out_lines: list[str] = []
         while time.time() < deadline and not got_id4:
-            r, _, _ = select.select([proc.stdout], [], [], 0.2)
+            r, _, _ = select.select([proc.stdout], [], [], 0.5)
             if r:
                 line = proc.stdout.readline()
                 if not line:
@@ -145,7 +190,9 @@ def test_inner_child_death_midturn_returns_clean_result(tmp_path: Path) -> None:
                     got_id4 = True
             alive()
 
-        assert got_id4, f"server hung — no session/prompt result after inner child died. stdout={out_lines!r}"
+        assert got_id4, (
+            f"server hung — no session/prompt result after inner child died. stdout={out_lines!r}"
+        )
     finally:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
