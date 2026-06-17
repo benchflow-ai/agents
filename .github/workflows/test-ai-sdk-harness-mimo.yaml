@@ -5,12 +5,12 @@ on:
     branches: [main]
     paths:
       - 'ai-sdk/harness-mimo/**'
-      - '.github/workflows/test-ai-sdk/harness-mimo.yaml'
+      - '.github/workflows/test-ai-sdk-harness-mimo.yaml'
   pull_request:
     branches: [main]
     paths:
       - 'ai-sdk/harness-mimo/**'
-      - '.github/workflows/test-ai-sdk/harness-mimo.yaml'
+      - '.github/workflows/test-ai-sdk-harness-mimo.yaml'
 
 jobs:
   test:
