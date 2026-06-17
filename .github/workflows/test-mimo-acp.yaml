@@ -1,0 +1,34 @@
+name: mimo-acp
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mimo-acp/**'
+      - '.github/workflows/test-mimo-acp.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mimo-acp/**'
+      - '.github/workflows/test-mimo-acp.yaml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+        working-directory: mimo-acp
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      # --prerelease=allow: benchflow pins an rc litellm
+      - name: Install dependencies
+        run: uv pip install --python ${Python_ROOT_DIR} --prerelease=allow -e '.[dev]'
+      - name: Run pytest
+        run: pytest -q
