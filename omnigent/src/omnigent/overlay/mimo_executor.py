@@ -18,10 +18,15 @@ executes its own tools — the Omnigent Session must not re-execute the observed
 ``ToolCallRequest``/``ToolCallComplete`` events.
 
 MiMo is an OpenCode fork: it validates model ids against the models.dev catalog
-and rejects BenchFlow's LiteLLM proxy alias, so the harness routes the **native**
-model id (``mimo/mimo-auto`` free channel by default, or ``xiaomi/mimo-v2.5-pro``)
-and credentials via env, never the proxy — the same reason ``harness-pi``
-bypasses the proxy.
+and won't accept BenchFlow's bare ``benchflow-*`` proxy alias as a stock model
+id. In **proxy mode** (``usage_tracking != off``) the bridge works around that by
+registering a custom OpenAI-compatible provider at the proxy and routing the turn
+as ``benchflow/<safe_model_alias>`` (see :meth:`MimoAcp.start`), so MiMo POSTs
+every agent turn through BenchFlow's usage proxy and the kernel captures the raw
+prompts + tokens (``usage_source=provider_response``). On the free
+``mimo/mimo-auto`` channel (``usage_tracking=off``) there is no proxy: MiMo talks
+straight to its own endpoint with the native model id, and the trace sidecar (see
+below) is what surfaces tool use + native usage.
 """
 
 from __future__ import annotations
@@ -119,11 +124,12 @@ class MimoExecutor(Executor):
         self._acp: MimoAcp | None = None
         # When set, each turn's tool calls + native ACP usage are written here as
         # one JSON object so the out-of-sandbox ``OmnigentSession`` can surface
-        # them to BenchFlow's trajectory — MiMo runs usage_tracking=off (it
-        # rejects the LiteLLM proxy alias), so without this sidecar the proxy
-        # captures zero tokens and the run would trip BenchFlow's zero-activity
-        # guard (zero tokens AND zero tool calls → reward nulled). The bridge
-        # makes mimo runs trackable instead of silently failing.
+        # them to BenchFlow's trajectory. On the free ``mimo/mimo-auto`` channel
+        # (usage_tracking=off) MiMo talks straight to its own endpoint, so the
+        # proxy sees nothing — without this sidecar the run would show zero tokens
+        # AND zero tool calls and trip BenchFlow's zero-activity guard (reward
+        # nulled). In proxy mode the proxy ALSO captures the raw exchanges, but
+        # the trace keeps the trajectory tool-step-auditable either way.
         self._trace_path = trace_path
 
     # ── Executor capability flags ────────────────────────────────────────
