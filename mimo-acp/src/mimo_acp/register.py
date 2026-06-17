@@ -13,20 +13,32 @@ Gotcha: MiMo's ACP ``initialize`` reports ``agentInfo.name="OpenCode"`` (the
 upstream fork name). The BenchFlow-side agent name is ``mimo`` (the registry
 key) and is independent of that wire value — tests/docs must not conflate them.
 
-PROXY MODE (this instrumented build): to capture wire-level raw LLM
-(trajectory/llm_trajectory.jsonl) the agent's model calls must traverse
-BenchFlow's LiteLLM usage proxy. BenchFlow drives the model via
-``session/set_config_option(configId='model')`` and, with
+PROXY MODE (this instrumented build, the validated path): to capture wire-level
+raw LLM (trajectory/llm_trajectory.jsonl) the agent's model calls must traverse
+BenchFlow's LiteLLM usage proxy. BenchFlow drives model selection over the
+standard ACP ``session/set_model`` request and, with
 ``acp_model_format='provider/model'`` + the proxy alias
-``benchflow-deepseek-deepseek-v4-flash``, sends ``openai/<alias>`` (it can only
-ever emit the ``openai/`` prefix for ``benchflow-*`` aliases). So the launcher
-must register a custom OpenAI-compatible provider under the key ``openai`` that
-points at the proxy (``$OPENAI_BASE_URL``) AND carries a ``models`` map keyed
-EXACTLY by the bare alias — otherwise mimo throws ``ProviderModelNotFoundError``
-and the turn ends with zero LLM requests (the pr8-proxy5..8 failure signature).
-Because mimo's built-in ``openai`` provider auto-activates from ``OPENAI_*`` env
-and then conflicts with the redefine (silent 0-token turn), the launcher unsets
-``OPENAI_BASE_URL``/``OPENAI_API_KEY`` *after* baking them into the config.
+``benchflow-deepseek-deepseek-v4-flash``, sends ``openai/<alias>`` (see
+benchflow ``acp/runtime.py::_format_acp_model`` — it emits the ``openai/``
+prefix for every ``benchflow-*`` alias). So the launcher must register a custom
+OpenAI-compatible provider under the key ``openai`` that points at the proxy
+(``$OPENAI_BASE_URL``) AND carries a ``models`` map keyed EXACTLY by the bare
+alias — otherwise mimo throws ``ProviderModelNotFoundError`` and the turn ends
+with zero LLM requests (the pr8-proxy5..8 failure signature). The config is
+written to ``{home}/.config/mimocode/mimocode.json`` (the canonical location
+MiMo Code reads, matching benchflow-core's native ``mimo`` agent) and also to
+``./mimocode.json`` so routing is not cwd-dependent. Because mimo's built-in
+``openai`` provider auto-activates from ``OPENAI_*`` env and then conflicts with
+the redefine (silent 0-token turn), the launcher unsets
+``OPENAI_BASE_URL``/``OPENAI_API_KEY`` *after* baking them into the config. As a
+fail-fast guard, if ``OPENAI_BASE_URL`` is set but the alias is empty the
+launcher aborts (rc 78) instead of emitting a silent zero-LLM turn.
+
+This raw-LLM capture via the proxy is THIS package's validated result (a fresh
+Daytona eval of ``deepseek/deepseek-v4-flash`` lands reward 1.0, 7 tool calls,
+``usage_source=provider_response`` with multiple MiMoCode agent-turns). The free
+key-free ``mimo/mimo-auto`` channel also works in-sandbox but routes to MiMo's
+backend (no proxy, no trajectory).
 
 When ``BF_PR8_DEBUG`` is set, the launcher also emits ``BF_DIAG`` lines to
 STDOUT before ``exec``-ing mimo; benchflow's ContainerTransport routes any
@@ -81,35 +93,51 @@ def _launch_cmd() -> str:
     because the base64 payload contains no spaces and the surrounding tokens have
     no internal whitespace, so split()/join() is a no-op on it.
 
-    The decoded body writes the proxy mimocode.json, optionally (when
-    ``BF_PR8_DEBUG`` is set) dumps a redacted BF_DIAG banner to STDOUT (synced
-    via agent/mimo.txt), neutralises the OPENAI_* env collision, then ``exec``s
-    mimo so it replaces the shell.
+    The decoded body, in proxy mode, fails fast if the alias is missing, writes
+    the proxy mimocode.json to both ``{home}/.config/mimocode/mimocode.json``
+    (canonical) and ``./mimocode.json``, optionally (when ``BF_PR8_DEBUG`` is
+    set) dumps a redacted BF_DIAG banner to STDOUT (synced via agent/mimo.txt),
+    neutralises the OPENAI_* env collision, then ``exec``s mimo so it replaces
+    the shell.
     """
     import base64
 
     node = f"{_BENCHFLOW_NODE_PREFIX}/bin/node"
     # NOTE: this body is a here-doc-free shell program; $A/$B/$K expand at launch
     # in the sandbox (the proxy alias + proxy URL + proxy key benchflow injects).
-    body = r'''
+    body = r"""
 A="${BENCHFLOW_LITELLM_MODEL_ALIAS:-}"
 B="${OPENAI_BASE_URL:-}"
 K="${OPENAI_API_KEY:-}"
+# HARD ERROR (fail fast): proxy URL is present but the alias is empty. Without
+# the alias the custom "openai" provider has no models map, so mimo would raise
+# ProviderModelNotFoundError and end the turn with ZERO captured LLM requests —
+# a silent reward-0 that looks like a model failure. Surface it loudly instead.
+if [ -n "$B" ] && [ -z "$A" ]; then
+  echo "mimo-acp launcher FATAL: OPENAI_BASE_URL is set (proxy mode) but BENCHFLOW_LITELLM_MODEL_ALIAS is empty; the custom openai provider would have no model and mimo would emit zero LLM requests (ProviderModelNotFound). Aborting." 1>&2
+  exit 78
+fi
 if [ -n "$B" ] && [ -n "$A" ]; then
-  cat > ./mimocode.json <<JSONEOF
-{
-  "\$schema": "https://opencode.ai/config.json",
+  # Canonical config location MiMo Code (OpenCode fork) reads:
+  # {home}/.config/mimocode/mimocode.json (matches benchflow-core's native mimo
+  # agent). Also written to ./mimocode.json (cwd) as a belt-and-suspenders for
+  # the proven-working run, so the routing is not cwd-dependent.
+  CFG_HOME="${HOME:-/root}/.config/mimocode"
+  mkdir -p "$CFG_HOME"
+  CFG_JSON='{
+  "$schema": "https://opencode.ai/config.json",
   "provider": {
     "openai": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "BenchFlow Proxy",
-      "options": { "baseURL": "$B", "apiKey": "${K:-benchflow}" },
-      "models": { "$A": { "name": "$A" } }
+      "options": { "baseURL": "'"$B"'", "apiKey": "'"${K:-benchflow}"'" },
+      "models": { "'"$A"'": { "name": "'"$A"'" } }
     }
   },
-  "model": "openai/$A"
-}
-JSONEOF
+  "model": "openai/'"$A"'"
+}'
+  printf '%s\n' "$CFG_JSON" > "$CFG_HOME/mimocode.json"
+  printf '%s\n' "$CFG_JSON" > ./mimocode.json
   CFG_WRITTEN=yes
 else
   CFG_WRITTEN=no
@@ -131,16 +159,14 @@ if [ -n "${BF_PR8_DEBUG:-}" ]; then
   echo BF_DIAG mimocode_end
 fi
 unset OPENAI_BASE_URL OPENAI_API_KEY
-'''
+"""
     body = body + f"exec {node} {_MIMO_BIN} acp\n"
     b64 = base64.b64encode(body.encode()).decode()
     script = "/tmp/mimo-acp-launch.sh"
     # printf|base64 pipeline: no internal whitespace in the b64 payload, so the
     # which-rewrite's split()/" ".join() round-trip is a no-op and the shell
     # metacharacters (| > &&) survive intact.
-    return (
-        f"printf '%s' '{b64}' | base64 -d > {script} && sh {script}"
-    )
+    return f"printf '%s' '{b64}' | base64 -d > {script} && sh {script}"
 
 
 def register() -> None:

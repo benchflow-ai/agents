@@ -57,7 +57,9 @@ def test_launch_runs_mimo_acp() -> None:
     # The which-rewrite splits on whitespace and rejoins; the payload + the
     # printf|base64 wrapper must contain no internal whitespace runs that would
     # be collapsed, so the shell metacharacters survive intact.
-    assert " | base64 -d > " in cmd and cmd.strip().endswith("sh /tmp/mimo-acp-launch.sh")
+    assert " | base64 -d > " in cmd and cmd.strip().endswith(
+        "sh /tmp/mimo-acp-launch.sh"
+    )
     body = _decode_launcher(cmd)
     # decoded body execs the native mimo acp server (mimo IS the ACP server)
     assert _MIMO_BIN in body
