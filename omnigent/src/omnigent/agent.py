@@ -101,7 +101,7 @@ def _build_config_yaml(*, base_url: str, api_key: str, model: str) -> str:
     )
 
 
-def _build_mimo_env_file(*, base_url: str, api_key: str) -> str:
+def _build_mimo_env_file(*, base_url: str, api_key: str, model: str = "") -> str:
     """Render ``~/.omnigent/mimo.env`` — sourced by the mimo ``omnigent run`` shell.
 
     Emits ``export HARNESS_MIMO_GATEWAY_BASE_URL=…`` / ``…_API_KEY=…`` for the
@@ -119,6 +119,10 @@ def _build_mimo_env_file(*, base_url: str, api_key: str) -> str:
         lines.append(f"export HARNESS_MIMO_GATEWAY_BASE_URL={_q(base_url)}")
     if api_key:
         lines.append(f"export HARNESS_MIMO_GATEWAY_API_KEY={_q(api_key)}")
+    # proxy mode: route the model via the file too (the daemon-spawned harness
+    # does not inherit the CLI env), so the executor uses the right model id.
+    if model:
+        lines.append(f"export HARNESS_MIMO_MODEL={_q(model)}")
     return "\n".join(lines) + "\n"
 
 
@@ -232,7 +236,7 @@ class OmnigentAgent:
         # never exposed in the sandbox process listing. The free `mimo/mimo-auto`
         # channel needs no creds, so this file is harmless-empty there.
         if self._harness == "mimo":
-            mimo_env = _build_mimo_env_file(base_url=base_url, api_key=api_key)
+            mimo_env = _build_mimo_env_file(base_url=base_url, api_key=api_key, model=model)
             mimo_env_path = f"{home}/.omnigent/mimo.env"
             mimo_b64 = base64.b64encode(mimo_env.encode("utf-8")).decode("ascii")
             await sandbox.exec(

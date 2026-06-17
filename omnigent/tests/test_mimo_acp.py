@@ -8,6 +8,7 @@ exercised end-to-end, plus the server→client permission auto-allow.
 """
 
 import asyncio
+import json as _json
 import os
 import stat
 import sys
@@ -263,6 +264,73 @@ def test_run_prompt_surfaces_rpc_error_as_terminal(tmp_path):
     events = asyncio.run(asyncio.wait_for(go(), timeout=20))
     assert events[-1]["kind"] == "error"
     assert "error" == events[-1]["kind"] and events[-1]["message"]
+
+
+def test_proxy_mode_writes_custom_provider_and_routes_inner_model(fake_mimo_bin, tmp_path):
+    """In proxy mode (OPENAI_BASE_URL set), start() must register a custom
+    OpenAI-compatible ``benchflow`` provider at the proxy and route the turn as
+    ``benchflow/<safe_alias>`` so MiMo POSTs to benchflow's usage proxy (which is
+    what lets benchflow write trajectory/llm_trajectory.jsonl). The bare
+    ``benchflow-*`` alias is models.dev-invalid and MiMo would reject it
+    directly -- only a custom-provider id is accepted."""
+
+    async def go():
+        env = dict(os.environ)
+        env["OPENAI_BASE_URL"] = "http://127.0.0.1:65500/v1"
+        env["OPENAI_API_KEY"] = "sk-proxy"
+        client = await MimoAcp.start(
+            mimo_bin=fake_mimo_bin,
+            cwd=str(tmp_path),
+            model="benchflow-deepseek-deepseek-v4-flash",
+            env=env,
+        )
+        await client.close()
+
+    asyncio.run(asyncio.wait_for(go(), timeout=20))
+
+    cfg_path = tmp_path / ".mimocode" / "mimocode.json"
+    assert cfg_path.exists(), "proxy mode must write .mimocode/mimocode.json"
+    cfg = _json.loads(cfg_path.read_text())
+    prov = cfg["provider"]["benchflow"]
+    assert prov["npm"] == "@ai-sdk/openai-compatible"
+    assert prov["options"]["baseURL"] == "http://127.0.0.1:65500/v1"
+    assert prov["options"]["apiKey"] == "sk-proxy"
+    assert "benchflow-deepseek-deepseek-v4-flash" in prov["models"]
+
+
+def test_proxy_alias_sanitised_to_safe_model_alias(fake_mimo_bin, tmp_path):
+    """A provider/model id (slashes, dots) is sanitised to the same
+    ``benchflow-<...>`` shape benchflow's safe_model_alias produces, so the
+    custom-provider models-map key matches what the proxy actually serves."""
+
+    async def go():
+        env = dict(os.environ)
+        env["OPENAI_BASE_URL"] = "http://127.0.0.1:65500/v1"
+        await (await MimoAcp.start(
+            mimo_bin=fake_mimo_bin, cwd=str(tmp_path),
+            model="deepseek/deepseek-v4-flash", env=env,
+        )).close()
+
+    asyncio.run(asyncio.wait_for(go(), timeout=20))
+    cfg = _json.loads((tmp_path / ".mimocode" / "mimocode.json").read_text())
+    key = next(iter(cfg["provider"]["benchflow"]["models"]))
+    assert key.startswith("benchflow-")
+    assert "/" not in key
+
+
+def test_native_mode_writes_no_proxy_config(fake_mimo_bin, tmp_path):
+    """Free mimo/mimo-auto path (no OPENAI_BASE_URL) must NOT write a proxy
+    provider -- usage_tracking=off stays native (un-proxied), unchanged."""
+
+    async def go():
+        env = {k: v for k, v in os.environ.items() if k != "OPENAI_BASE_URL"}
+        await (await MimoAcp.start(
+            mimo_bin=fake_mimo_bin, cwd=str(tmp_path),
+            model="mimo/mimo-auto", env=env,
+        )).close()
+
+    asyncio.run(asyncio.wait_for(go(), timeout=20))
+    assert not (tmp_path / ".mimocode" / "mimocode.json").exists()
 
 
 if sys.platform == "win32":  # pragma: no cover - asyncio subprocess needs a real shell

@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from typing import Any, AsyncIterator
 
@@ -176,6 +177,34 @@ class MimoAcp:
         where the verifier reads. ``model`` is sent via ``session/set_model``
         (best-effort; falls back to MiMo's session default on rejection).
         """
+        # Proxy mode (usage_tracking != off → OPENAI_BASE_URL set): register a
+        # custom OpenAI-compatible provider at benchflow's usage proxy and route
+        # the turn as benchflow/<alias>. mimo rejects the models.dev `benchflow-*`
+        # id directly but accepts a custom-provider id, so it POSTs to the proxy,
+        # which captures trajectory/llm_trajectory.jsonl (raw prompts + tokens).
+        inner_model = model
+        _proxy_base = env.get("OPENAI_BASE_URL")
+        if _proxy_base and model:
+            # must equal benchflow.safe_model_alias (what the proxy serves)
+            _alias = model if model.startswith("benchflow-") else ("benchflow-" + re.sub(r"[^a-zA-Z0-9._-]+", "-", model).strip("-").replace("--", "-"))
+            try:
+                _cfg_dir = os.path.join(cwd, ".mimocode")
+                os.makedirs(_cfg_dir, exist_ok=True)
+                with open(os.path.join(_cfg_dir, "mimocode.json"), "w") as _f:
+                    json.dump({
+                        "$schema": "https://opencode.ai/config.json",
+                        "provider": {"benchflow": {
+                            "npm": "@ai-sdk/openai-compatible",
+                            "name": "BenchFlow Proxy",
+                            "options": {"baseURL": _proxy_base,
+                                        "apiKey": env.get("OPENAI_API_KEY", "benchflow")},
+                            "models": {_alias: {"name": _alias}},
+                        }},
+                    }, _f, indent=2)
+                inner_model = "benchflow/" + _alias
+                logger.info("mimo proxy mode: custom provider written, inner model=%s", inner_model)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("mimo proxy provider write failed (native fallback): %s", exc)
         proc = await asyncio.create_subprocess_exec(
             mimo_bin,
             "acp",
@@ -208,7 +237,7 @@ class MimoAcp:
             try:
                 await self._request(
                     "session/set_model",
-                    {"sessionId": self.acp_sid, "modelId": model},
+                    {"sessionId": self.acp_sid, "modelId": inner_model},
                 )
             except Exception as exc:  # noqa: BLE001 — non-fatal: fall back to session default
                 logger.warning("mimo acp session/set_model(%r) failed: %s", model, exc)

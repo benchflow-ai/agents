@@ -33,6 +33,7 @@ Env vars read at executor construction (set by ``OmnigentSession`` on the
 from __future__ import annotations
 
 import os
+import pathlib
 
 from fastapi import FastAPI
 
@@ -58,6 +59,20 @@ _ENV_TRACE = "HARNESS_MIMO_TRACE"
 DEFAULT_TRACE_PATH = "/tmp/omnigent-mimo-trace.json"
 
 
+def _mimo_env_file_get(name: str) -> str:
+    """Read a single `export NAME='val'` from ~/.omnigent/mimo.env (the daemon-
+    spawned harness may not inherit the CLI env; the file is the out-of-band path)."""
+    try:
+        import os.path as _op
+        for _line in pathlib.Path(_op.expanduser("~/.omnigent/mimo.env")).read_text().splitlines():
+            _line = _line.strip()
+            if _line.startswith("export " + name + "="):
+                return _line.split("=", 1)[1].strip().strip("'\"")
+    except Exception:
+        pass
+    return ""
+
+
 def _build_mimo_subprocess_env() -> dict[str, str]:
     """Translate the optional gateway creds into MiMo's OpenAI-compatible env.
 
@@ -67,6 +82,26 @@ def _build_mimo_subprocess_env() -> dict[str, str]:
     env: dict[str, str] = {}
     base_url = os.environ.get(_ENV_GATEWAY_BASE_URL, "").strip()
     api_key = os.environ.get(_ENV_GATEWAY_API_KEY, "").strip()
+    # Daemon-env-gap fallback (same reason DEFAULT_TRACE_PATH is a fixed file):
+    # omnigent's `run` daemon spawns this harness WITHOUT the CLI env, so the
+    # HARNESS_MIMO_GATEWAY_* exports sourced before `omnigent run` may not reach
+    # os.environ here. Read them from the mimo.env FILE that OmnigentAgent.connect
+    # wrote, so proxy-mode (usage_tracking != off) actually routes through the
+    # gateway and benchflow can capture trajectory/llm_trajectory.jsonl.
+    if not base_url:
+        try:
+            import os.path as _op
+            for _line in pathlib.Path(_op.expanduser("~/.omnigent/mimo.env")).read_text().splitlines():
+                _line = _line.strip()
+                if _line.startswith("export " + _ENV_GATEWAY_BASE_URL + "="):
+                    base_url = _line.split("=", 1)[1].strip().strip("'\"")
+                elif _line.startswith("export " + _ENV_GATEWAY_API_KEY + "="):
+                    api_key = _line.split("=", 1)[1].strip().strip("'\"")
+            import sys as _sys
+            print("MIMO_HARNESS gateway from file: base_set=" + str(bool(base_url)), file=_sys.stderr, flush=True)
+        except Exception as _e:
+            import sys as _sys
+            print("MIMO_HARNESS gateway-file read err: " + str(_e), file=_sys.stderr, flush=True)
     if base_url:
         env["OPENAI_BASE_URL"] = base_url
     if api_key:
@@ -83,7 +118,7 @@ def _build_mimo_executor() -> Executor:
         cwd=os.environ.get(_ENV_CWD) or os.getcwd(),
         # model reaches the executor via `omnigent run --model` →
         # request.model_override → run_turn's config.model, not this env.
-        model=os.environ.get(_ENV_MODEL) or None,
+        model=os.environ.get(_ENV_MODEL) or _mimo_env_file_get(_ENV_MODEL) or None,
         mimo_path=os.environ.get(_ENV_PATH) or None,
         env=_build_mimo_subprocess_env(),
         # Fixed default (see DEFAULT_TRACE_PATH): the env does not propagate to
