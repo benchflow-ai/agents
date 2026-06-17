@@ -161,11 +161,16 @@ class OmnigentSession:
         # with ``self`` after every appended event so a writer streams to disk.
         self.on_change: Callable[[OmnigentSession], None] | None = None
         # MiMo trackability bridge: the in-sandbox MimoExecutor writes each turn's
-        # tool calls + native ACP usage to this file (MiMo runs usage_tracking=off,
-        # so the proxy sees nothing); ``prompt`` reads it back to emit ``tool_call``
-        # events and accumulate cumulative usage, which the rollout collects via
-        # ``latest_usage_totals``. Without this, a mimo run shows zero tokens AND
-        # zero tool calls and BenchFlow nulls the reward as a suspected API error.
+        # tool calls + native ACP usage to this file; ``prompt`` reads it back to
+        # emit ``tool_call`` events and accumulate cumulative usage, which the
+        # rollout collects via ``latest_usage_totals``. This is what surfaces tool
+        # use + tokens on the free ``usage_tracking=off`` channel, where MiMo
+        # talks straight to its own endpoint and the BenchFlow usage proxy never
+        # sees the traffic. In proxy mode (``usage_tracking != off``) the proxy
+        # ALSO captures the raw exchanges directly, but the trace keeps the
+        # trajectory tool-step-auditable either way. Without it, a free-channel
+        # mimo run shows zero tokens AND zero tool calls and BenchFlow nulls the
+        # reward as a suspected API error.
         #
         # This is a SANDBOX-LOCAL path and MUST equal mimo_harness.DEFAULT_TRACE_PATH:
         # omnigent's `run` daemon spawns the harness with the daemon's env (NOT the
@@ -354,10 +359,15 @@ class OmnigentSession:
         """Cumulative native token usage for the rollout's usage collector.
 
         BenchFlow's session rollout reads this (``_collect_native_acp_usage`` →
-        ``getattr(session, "latest_usage_totals")``) to attribute tokens when the
-        agent runs usage_tracking=off — which MiMo must, since it rejects the
-        LiteLLM proxy alias. Returns ``None`` until a turn reports usage so the
-        collector skips cleanly (omnigent-pi has no such method and is unaffected).
+        ``getattr(session, "latest_usage_totals")``) to attribute tokens on the
+        free ``usage_tracking=off`` channel (``mimo/mimo-auto``), where MiMo
+        talks straight to its own free endpoint and the BenchFlow usage proxy
+        never sees the traffic. In proxy mode (``usage_tracking != off``) MiMo is
+        instead pointed at the proxy via a custom OpenAI-compatible provider (see
+        ``MimoAcp.start``), so the proxy captures the raw exchanges and tokens and
+        this native fallback simply stays empty. Returns ``None`` until a turn
+        reports usage so the collector skips cleanly (omnigent-pi has no such
+        method and is unaffected).
         """
         return dict(self._usage_totals) if self._usage_totals else None
 
@@ -392,12 +402,19 @@ class OmnigentSession:
         """Tear down the omnigent daemon + mimo session artifacts (best-effort)."""
         await self.cancel()
         if self._harness == "mimo":
-            # Remove the trace sidecar and the gateway-cred env file so neither
-            # the (tool-name/result) trace nor the raw API key lingers in the
-            # sandbox after the session ends.
+            # Remove every mimo secret-bearing artifact so nothing lingers in the
+            # sandbox after the session ends:
+            #   * the tool-name/result trace sidecar,
+            #   * the gateway-cred env file (raw API key), and
+            #   * the proxy-mode mimocode.json the in-sandbox MimoAcp writes into
+            #     the WORKSPACE (``/app/.mimocode/mimocode.json``) — it embeds the
+            #     resolved proxy OPENAI_API_KEY, so it must not survive into the
+            #     verified workspace.
+            mimocode_cfg = shlex.quote(f"{_WORKSPACE}/.mimocode/mimocode.json")
             try:
                 await self._sandbox.exec(
-                    f'rm -f {shlex.quote(self._mimo_trace_path)} "$HOME/.omnigent/mimo.env"',
+                    f"rm -f {shlex.quote(self._mimo_trace_path)} "
+                    f'{mimocode_cfg} "$HOME/.omnigent/mimo.env"',
                     user=self._exec_user,
                     timeout_sec=30,
                 )

@@ -19,6 +19,7 @@ from omnigent.overlay._mimo_acp import (
     DEFAULT_MODEL,
     MimoAcp,
     map_usage,
+    safe_model_alias,
     text_of,
     translate_update,
 )
@@ -266,13 +267,17 @@ def test_run_prompt_surfaces_rpc_error_as_terminal(tmp_path):
     assert "error" == events[-1]["kind"] and events[-1]["message"]
 
 
-def test_proxy_mode_writes_custom_provider_and_routes_inner_model(fake_mimo_bin, tmp_path):
+def test_proxy_mode_writes_custom_provider_and_routes_inner_model(
+    fake_mimo_bin, tmp_path
+):
     """In proxy mode (OPENAI_BASE_URL set), start() must register a custom
     OpenAI-compatible ``benchflow`` provider at the proxy and route the turn as
     ``benchflow/<safe_alias>`` so MiMo POSTs to benchflow's usage proxy (which is
     what lets benchflow write trajectory/llm_trajectory.jsonl). The bare
     ``benchflow-*`` alias is models.dev-invalid and MiMo would reject it
     directly -- only a custom-provider id is accepted."""
+
+    captured = {}
 
     async def go():
         env = dict(os.environ)
@@ -284,6 +289,7 @@ def test_proxy_mode_writes_custom_provider_and_routes_inner_model(fake_mimo_bin,
             model="benchflow-deepseek-deepseek-v4-flash",
             env=env,
         )
+        captured["inner_model"] = client.inner_model
         await client.close()
 
     asyncio.run(asyncio.wait_for(go(), timeout=20))
@@ -295,7 +301,13 @@ def test_proxy_mode_writes_custom_provider_and_routes_inner_model(fake_mimo_bin,
     assert prov["npm"] == "@ai-sdk/openai-compatible"
     assert prov["options"]["baseURL"] == "http://127.0.0.1:65500/v1"
     assert prov["options"]["apiKey"] == "sk-proxy"
-    assert "benchflow-deepseek-deepseek-v4-flash" in prov["models"]
+    # the models-map key is exactly safe_model_alias (already-aliased: unchanged)
+    alias = "benchflow-deepseek-deepseek-v4-flash"
+    assert safe_model_alias("benchflow-deepseek-deepseek-v4-flash") == alias
+    assert alias in prov["models"]
+    assert prov["models"][alias] == {"name": alias}
+    # the turn is routed as benchflow/<alias> (a custom-provider id MiMo accepts)
+    assert captured["inner_model"] == "benchflow/" + alias
 
 
 def test_proxy_alias_sanitised_to_safe_model_alias(fake_mimo_bin, tmp_path):
@@ -303,19 +315,62 @@ def test_proxy_alias_sanitised_to_safe_model_alias(fake_mimo_bin, tmp_path):
     ``benchflow-<...>`` shape benchflow's safe_model_alias produces, so the
     custom-provider models-map key matches what the proxy actually serves."""
 
+    captured = {}
+
     async def go():
         env = dict(os.environ)
         env["OPENAI_BASE_URL"] = "http://127.0.0.1:65500/v1"
-        await (await MimoAcp.start(
-            mimo_bin=fake_mimo_bin, cwd=str(tmp_path),
-            model="deepseek/deepseek-v4-flash", env=env,
-        )).close()
+        client = await MimoAcp.start(
+            mimo_bin=fake_mimo_bin,
+            cwd=str(tmp_path),
+            model="deepseek/deepseek-v4-flash",
+            env=env,
+        )
+        captured["inner_model"] = client.inner_model
+        await client.close()
 
     asyncio.run(asyncio.wait_for(go(), timeout=20))
     cfg = _json.loads((tmp_path / ".mimocode" / "mimocode.json").read_text())
     key = next(iter(cfg["provider"]["benchflow"]["models"]))
     assert key.startswith("benchflow-")
     assert "/" not in key
+    # the models-map key is EXACTLY benchflow's safe_model_alias for the id —
+    # not the old inline regex (which dropped the sha1/empty-string cases)
+    expected = safe_model_alias("deepseek/deepseek-v4-flash")
+    assert key == expected == "benchflow-deepseek-deepseek-v4-flash"
+    assert captured["inner_model"] == "benchflow/" + expected
+
+
+def test_safe_model_alias_matches_benchflow_incl_edge_cases():
+    """The module's safe_model_alias must reproduce benchflow's exactly,
+    including the >96-char sha1 truncation and the empty-string fallback the
+    old inline regex omitted (both can 404 the inner model at the proxy)."""
+    # already-aliased: returned unchanged
+    assert safe_model_alias("benchflow-foo") == "benchflow-foo"
+    # provider/model id: slashes/dots collapse to a benchflow-<...> id
+    assert safe_model_alias("deepseek/deepseek-v4-flash") == (
+        "benchflow-deepseek-deepseek-v4-flash"
+    )
+    # empty / all-special id falls back to "model" (never a bare "benchflow-")
+    assert safe_model_alias("///") == "benchflow-model"
+    assert safe_model_alias("") == "benchflow-model"
+    # >96 chars: sha1-suffixed and length-bounded (never the raw long string)
+    long_model = "x" * 200
+    alias = safe_model_alias(long_model)
+    assert alias.startswith("benchflow-")
+    assert len(alias) < len("benchflow-" + long_model)
+    # deterministic
+    assert safe_model_alias(long_model) == alias
+    # if benchflow is importable, the module alias must equal it bit-for-bit
+    try:
+        from benchflow.providers.litellm_config import (
+            safe_model_alias as bf_alias,
+        )
+    except Exception:  # pragma: no cover - benchflow not installed in this env
+        bf_alias = None
+    if bf_alias is not None:
+        for m in ("deepseek/deepseek-v4-flash", "x" * 200, "a.b/c:d", "model"):
+            assert safe_model_alias(m) == bf_alias(m), m
 
 
 def test_native_mode_writes_no_proxy_config(fake_mimo_bin, tmp_path):
@@ -324,10 +379,14 @@ def test_native_mode_writes_no_proxy_config(fake_mimo_bin, tmp_path):
 
     async def go():
         env = {k: v for k, v in os.environ.items() if k != "OPENAI_BASE_URL"}
-        await (await MimoAcp.start(
-            mimo_bin=fake_mimo_bin, cwd=str(tmp_path),
-            model="mimo/mimo-auto", env=env,
-        )).close()
+        await (
+            await MimoAcp.start(
+                mimo_bin=fake_mimo_bin,
+                cwd=str(tmp_path),
+                model="mimo/mimo-auto",
+                env=env,
+            )
+        ).close()
 
     asyncio.run(asyncio.wait_for(go(), timeout=20))
     assert not (tmp_path / ".mimocode" / "mimocode.json").exists()

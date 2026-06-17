@@ -59,18 +59,34 @@ _ENV_TRACE = "HARNESS_MIMO_TRACE"
 DEFAULT_TRACE_PATH = "/tmp/omnigent-mimo-trace.json"
 
 
-def _mimo_env_file_get(name: str) -> str:
-    """Read a single `export NAME='val'` from ~/.omnigent/mimo.env (the daemon-
-    spawned harness may not inherit the CLI env; the file is the out-of-band path)."""
+def _mimo_env_file() -> dict[str, str]:
+    """Parse ``~/.omnigent/mimo.env`` into a ``{NAME: value}`` dict.
+
+    The daemon-spawned harness may not inherit the ``omnigent run`` CLI env (the
+    same reason :data:`DEFAULT_TRACE_PATH` is a fixed file), so the gateway creds
+    + model are read back from the ``export NAME='val'`` file that
+    ``OmnigentAgent.connect`` wrote. Single parse loop shared by every reader
+    (model + gateway base/key). Returns ``{}`` on any read error — callers fall
+    back to ``os.environ``/defaults.
+    """
+    out: dict[str, str] = {}
     try:
-        import os.path as _op
-        for _line in pathlib.Path(_op.expanduser("~/.omnigent/mimo.env")).read_text().splitlines():
-            _line = _line.strip()
-            if _line.startswith("export " + name + "="):
-                return _line.split("=", 1)[1].strip().strip("'\"")
+        path = pathlib.Path(os.path.expanduser("~/.omnigent/mimo.env"))
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line.startswith("export "):
+                continue
+            name, _, value = line[len("export ") :].partition("=")
+            if name:
+                out[name.strip()] = value.strip().strip("'\"")
     except Exception:
         pass
-    return ""
+    return out
+
+
+def _mimo_env_file_get(name: str) -> str:
+    """Read a single ``export NAME='val'`` from ``~/.omnigent/mimo.env``."""
+    return _mimo_env_file().get(name, "")
 
 
 def _build_mimo_subprocess_env() -> dict[str, str]:
@@ -89,19 +105,9 @@ def _build_mimo_subprocess_env() -> dict[str, str]:
     # wrote, so proxy-mode (usage_tracking != off) actually routes through the
     # gateway and benchflow can capture trajectory/llm_trajectory.jsonl.
     if not base_url:
-        try:
-            import os.path as _op
-            for _line in pathlib.Path(_op.expanduser("~/.omnigent/mimo.env")).read_text().splitlines():
-                _line = _line.strip()
-                if _line.startswith("export " + _ENV_GATEWAY_BASE_URL + "="):
-                    base_url = _line.split("=", 1)[1].strip().strip("'\"")
-                elif _line.startswith("export " + _ENV_GATEWAY_API_KEY + "="):
-                    api_key = _line.split("=", 1)[1].strip().strip("'\"")
-            import sys as _sys
-            print("MIMO_HARNESS gateway from file: base_set=" + str(bool(base_url)), file=_sys.stderr, flush=True)
-        except Exception as _e:
-            import sys as _sys
-            print("MIMO_HARNESS gateway-file read err: " + str(_e), file=_sys.stderr, flush=True)
+        from_file = _mimo_env_file()
+        base_url = base_url or from_file.get(_ENV_GATEWAY_BASE_URL, "")
+        api_key = api_key or from_file.get(_ENV_GATEWAY_API_KEY, "")
     if base_url:
         env["OPENAI_BASE_URL"] = base_url
     if api_key:

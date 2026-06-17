@@ -172,15 +172,28 @@ internals drifted under the pin). The overlay modules:
 - `mimo_harness.py` — `create_app()` = `ExecutorAdapter(MimoExecutor).build()`,
   the required harness-contract entrypoint registered under `"mimo"`.
 
-### Trackability (why MiMo can't just reuse the pi path)
+### Trackability (raw-LLM capture in proxy mode; native fallback when off)
 
-MiMo validates model ids against the models.dev catalog and **rejects BenchFlow's
-LiteLLM proxy alias** (`ProviderModelNotFoundError`, zero tokens), so unlike
-`omnigent-pi` it must run **`usage_tracking="off"`** with the bare model id +
-raw creds. That means the proxy captures **zero tokens**, and the one-shot
-`omnigent run -p` stdout is opaque — so a naive mimo run shows zero tokens **and**
-zero tool calls, and BenchFlow's zero-activity guard nulls the reward as a
-suspected API error. To keep mimo runs **trackable**:
+MiMo (an OpenCode fork) validates model ids against the models.dev catalog and
+won't accept BenchFlow's bare `benchflow-*` proxy alias as a stock model id. But
+that does **not** force `usage_tracking="off"`: in **proxy mode**
+(`usage_tracking != off`) `MimoAcp.start` registers a **custom
+OpenAI-compatible provider** pointed at BenchFlow's usage proxy and routes the
+turn as `benchflow/<safe_model_alias>` (a custom-provider id MiMo *does* accept).
+MiMo then POSTs every agent turn to the proxy, so BenchFlow captures the raw
+prompts + tokens and the kernel writes `trajectory/llm_trajectory.jsonl` — same
+as any proxied agent. Verified on Daytona/citation-check: multiple
+`deepseek-v4-flash` status-200 agent turns (each carrying the `You are MiMoCode`
+system prompt + tool defs), `usage_source=provider_response`, reward 1.0.
+
+The alias is computed by `benchflow.providers.litellm_config.safe_model_alias`
+(imported, with a faithful in-module fallback incl. the >96-char sha1 truncation
+and empty-string cases) so the custom-provider models-map key matches exactly
+what the proxy serves — a mismatch would 404 the inner model.
+
+The free **`mimo/mimo-auto`** channel runs `usage_tracking="off"` (no key, no
+proxy): MiMo talks straight to its own endpoint, so the proxy sees nothing. For
+that path (and to keep the trajectory tool-step-auditable in either mode):
 
 - `MimoExecutor` writes each turn's tool calls + **native ACP usage** to a trace
   sidecar (`HARNESS_MIMO_TRACE`).

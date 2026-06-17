@@ -229,14 +229,20 @@ class OmnigentAgent:
             self._exec_user,
         )
 
-        # MiMo harness path: MiMo (OpenCode fork) rejects the LiteLLM proxy alias,
-        # so it routes the bare model + raw gateway creds via HARNESS_MIMO_* env
-        # (the harness subprocess inherits os.environ). Write the gateway creds to
-        # a sourced env file rather than the `omnigent run` argv so the API key is
-        # never exposed in the sandbox process listing. The free `mimo/mimo-auto`
-        # channel needs no creds, so this file is harmless-empty there.
+        # MiMo harness path: route the model + gateway creds via HARNESS_MIMO_*
+        # env (the harness subprocess inherits os.environ). MiMo (an OpenCode
+        # fork) won't accept BenchFlow's models.dev `benchflow-*` id directly, so
+        # in proxy mode (usage_tracking != off) MimoAcp.start registers a custom
+        # OpenAI-compatible provider pointed at the proxy and routes the turn as
+        # `benchflow/<alias>` — the proxy then captures the raw exchanges and
+        # tokens. Write the gateway creds to a sourced env file rather than the
+        # `omnigent run` argv so the API key is never exposed in the sandbox
+        # process listing. The free `mimo/mimo-auto` channel needs no creds, so
+        # this file is harmless-empty there.
         if self._harness == "mimo":
-            mimo_env = _build_mimo_env_file(base_url=base_url, api_key=api_key, model=model)
+            mimo_env = _build_mimo_env_file(
+                base_url=base_url, api_key=api_key, model=model
+            )
             mimo_env_path = f"{home}/.omnigent/mimo.env"
             mimo_b64 = base64.b64encode(mimo_env.encode("utf-8")).decode("ascii")
             await sandbox.exec(

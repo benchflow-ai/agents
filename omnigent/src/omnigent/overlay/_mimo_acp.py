@@ -35,6 +35,7 @@ Neutral event dicts yielded by :meth:`MimoAcp.run_prompt` (``kind`` discriminato
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -53,6 +54,38 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "mimo/mimo-auto"
 
 _ALLOW_RE = re.compile(r"allow|approve|yes", re.IGNORECASE)
+
+
+def safe_model_alias(model: str) -> str:
+    """Return the proxy-facing model alias for ``model`` (what the proxy serves).
+
+    Prefers :func:`benchflow.providers.litellm_config.safe_model_alias` so the
+    alias this module writes into ``.mimocode/mimocode.json`` always matches the
+    alias BenchFlow's usage proxy registered (otherwise the inner model id 404s
+    at the proxy). This module is intentionally dependency-free (it is shipped
+    verbatim into Omnigent's site-packages and unit-tested without BenchFlow
+    present), so when ``benchflow`` is unimportable we fall back to a faithful
+    re-implementation — INCLUDING the >96-char sha1 truncation and the
+    empty-string fallback the inline version previously dropped (both can 404 on
+    edge models). An already-aliased ``benchflow-…`` id is returned unchanged.
+    """
+    if model.startswith("benchflow-"):
+        return model
+    try:
+        from benchflow.providers.litellm_config import (
+            safe_model_alias as _bf_safe_model_alias,
+        )
+
+        return _bf_safe_model_alias(model)
+    except Exception:  # noqa: BLE001 — benchflow absent / import error: replicate
+        cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", model).strip("-")
+        cleaned = cleaned.replace("--", "-")
+        if not cleaned:
+            cleaned = "model"
+        if len(cleaned) > 96:
+            digest = hashlib.sha1(model.encode()).hexdigest()[:10]
+            cleaned = f"{cleaned[:80].rstrip('-')}-{digest}"
+        return f"benchflow-{cleaned}"
 
 
 def text_of(content: Any) -> str:
@@ -151,6 +184,12 @@ class MimoAcp:
         self._pending: dict[int, asyncio.Future[Any]] = {}
         self._update_handler: Any = None
         self.model = model
+        # The id actually sent to ``session/set_model`` — equals ``model`` on the
+        # native path, or ``benchflow/<safe_model_alias>`` once proxy mode has
+        # registered the custom provider (set in :meth:`start`). Exposed so the
+        # proxy-mode wiring is observable (tests, debugging) without re-reading
+        # the on-disk mimocode.json.
+        self.inner_model: str | None = model
         self.acp_sid: str | None = None
         # True once a turn's ``instructions`` (system prompt) have been folded
         # into the first prompt — the executor checks this to avoid re-sending
@@ -185,26 +224,43 @@ class MimoAcp:
         inner_model = model
         _proxy_base = env.get("OPENAI_BASE_URL")
         if _proxy_base and model:
-            # must equal benchflow.safe_model_alias (what the proxy serves)
-            _alias = model if model.startswith("benchflow-") else ("benchflow-" + re.sub(r"[^a-zA-Z0-9._-]+", "-", model).strip("-").replace("--", "-"))
+            # must equal benchflow.providers.litellm_config.safe_model_alias —
+            # the alias the proxy actually serves (incl. sha1 truncation / empty
+            # fallback for edge models); a mismatch 404s the inner model.
+            _alias = safe_model_alias(model)
             try:
                 _cfg_dir = os.path.join(cwd, ".mimocode")
                 os.makedirs(_cfg_dir, exist_ok=True)
                 with open(os.path.join(_cfg_dir, "mimocode.json"), "w") as _f:
-                    json.dump({
-                        "$schema": "https://opencode.ai/config.json",
-                        "provider": {"benchflow": {
-                            "npm": "@ai-sdk/openai-compatible",
-                            "name": "BenchFlow Proxy",
-                            "options": {"baseURL": _proxy_base,
-                                        "apiKey": env.get("OPENAI_API_KEY", "benchflow")},
-                            "models": {_alias: {"name": _alias}},
-                        }},
-                    }, _f, indent=2)
+                    json.dump(
+                        {
+                            "$schema": "https://opencode.ai/config.json",
+                            "provider": {
+                                "benchflow": {
+                                    "npm": "@ai-sdk/openai-compatible",
+                                    "name": "BenchFlow Proxy",
+                                    "options": {
+                                        "baseURL": _proxy_base,
+                                        "apiKey": env.get(
+                                            "OPENAI_API_KEY", "benchflow"
+                                        ),
+                                    },
+                                    "models": {_alias: {"name": _alias}},
+                                }
+                            },
+                        },
+                        _f,
+                        indent=2,
+                    )
                 inner_model = "benchflow/" + _alias
-                logger.info("mimo proxy mode: custom provider written, inner model=%s", inner_model)
+                logger.info(
+                    "mimo proxy mode: custom provider written, inner model=%s",
+                    inner_model,
+                )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("mimo proxy provider write failed (native fallback): %s", exc)
+                logger.warning(
+                    "mimo proxy provider write failed (native fallback): %s", exc
+                )
         proc = await asyncio.create_subprocess_exec(
             mimo_bin,
             "acp",
@@ -217,6 +273,7 @@ class MimoAcp:
             env=env,
         )
         self = cls(proc, model)
+        self.inner_model = inner_model
         await self._request(
             "initialize",
             {
