@@ -29,7 +29,8 @@ _MOCK_OK = Path(__file__).parent / "_mock_mimo_ok.mjs"
 
 
 def test_server_skips_daytona_in_seed() -> None:
-    assert "SKIP_SEED" in _SERVER_SRC
+    # seed + sync-back share one boundary-private predicate now (was SKIP_SEED)
+    assert "isBoundaryPrivate" in _SERVER_SRC
     assert '".daytona"' in _SERVER_SRC
     # symlinks are skipped too (root-owned/loop hazards)
     assert "isSymbolicLink()" in _SERVER_SRC

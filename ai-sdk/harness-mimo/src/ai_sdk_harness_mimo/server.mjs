@@ -54,22 +54,32 @@ let modelId = process.env.BENCHFLOW_PROVIDER_MODEL || "";
 let harnessSession = null, sessionDir = null, currentAbort = null, cachedAgent = null;
 
 const isMimoDir = (n) => /^mimo-/.test(n);
-// `.daytona` is Daytona's root-owned per-sandbox infra dir living in the task
-// cwd; copying it into the session dir makes mimo's own session writes fail with
-// EACCES under the non-root sandbox agent user. Skip it (mimo creates a fresh,
-// writable one). Per-entry try/catch so one un-copyable entry can't abort seeding.
-const SKIP_SEED = new Set([".daytona"]);
+// Names that must never cross the task-cwd <-> session-dir boundary in EITHER
+// direction (one predicate, applied to both seed and sync-back — the asymmetry
+// of guarding only seeding is exactly what leaked the proxy config back out):
+//  - `.daytona`  : Daytona's root-owned per-sandbox infra dir in the task cwd;
+//                  copying it into the session dir EACCESes mimo's own writes as
+//                  the non-root sandbox user (mimo makes a fresh, writable one).
+//  - `.mimocode` : the harness-written proxy provider config — must not be copied
+//                  back into agentCwd (the task artifact dir the verifier reads/
+//                  archives). Its secret is referenced via {env:OPENAI_API_KEY}
+//                  (see createMimoSession), but the config is still not a result.
+//  - mimo-*      : mimo's own per-session scratch dirs, not task results.
+const isBoundaryPrivate = (n) => n === ".daytona" || n === ".mimocode" || isMimoDir(n);
 const seedIntoSession = () => {                       // task files -> session dir
   for (const e of readdirSync(agentCwd, { withFileTypes: true })) {
-    if (isMimoDir(e.name) || e.isSymbolicLink() || SKIP_SEED.has(e.name)) continue;
+    if (isBoundaryPrivate(e.name) || e.isSymbolicLink()) continue;
+    // Per-entry try/catch so one un-copyable entry can't abort seeding.
     try { cpSync(join(agentCwd, e.name), join(sessionDir, e.name), { recursive: true }); }
     catch (err) { log("seed skip", e.name, String(err).slice(0, 120)); }
   }
 };
 const syncBackToCwd = () => {                          // agent results -> task cwd
   try {
-    for (const e of readdirSync(sessionDir, { withFileTypes: true }))
+    for (const e of readdirSync(sessionDir, { withFileTypes: true })) {
+      if (isBoundaryPrivate(e.name)) continue;        // never sync infra/credential dirs back
       cpSync(join(sessionDir, e.name), join(agentCwd, e.name), { recursive: true });
+    }
   } catch (e) { log("sync-back error:", String(e)); }
 };
 
@@ -180,7 +190,11 @@ async function createMimoSession({ startOpts, settings }) {
           benchflow: {
             npm: "@ai-sdk/openai-compatible",
             name: "BenchFlow Proxy",
-            options: { baseURL: proxyBase, apiKey: process.env.OPENAI_API_KEY || "benchflow" },
+            // Reference the proxy key via OpenCode's {env:...} config interpolation
+            // so the raw secret is NEVER serialized to disk — mimo resolves it from
+            // the child's env at load time. (No key -> harmless "benchflow"
+            // placeholder; the proxy accepts it and non-proxy runs never read this.)
+            options: { baseURL: proxyBase, apiKey: process.env.OPENAI_API_KEY ? "{env:OPENAI_API_KEY}" : "benchflow" },
             models: { [alias]: { name: alias } },
           },
         },
