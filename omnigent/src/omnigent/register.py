@@ -71,8 +71,10 @@ omnigent`` so bump both together.
 
 from __future__ import annotations
 
+import base64
 import logging
 import shlex
+from pathlib import Path
 
 from benchflow.agents.registry import (
     _BENCHFLOW_NODE_PREFIX,
@@ -242,4 +244,209 @@ def register():
     # Non-ACP field — set after construction so the core AgentConfig schema
     # change stays minimal (one optional field; see benchflow registry.py).
     config.session_factory = OMNIGENT_SESSION_FACTORY
+    return config
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# omnigent-mimo — MiMo Code (OpenCode fork) as a faithful `--harness mimo`
+# ─────────────────────────────────────────────────────────────────────────────
+# Omnigent's `--harness` is a CLOSED enum (`OMNIGENT_HARNESSES`) dispatched via a
+# hardcoded `_HARNESS_MODULES` dict — there is no plugin/register_harness seam.
+# So `omnigent-mimo` is an **install-time overlay**: install stock omnigent, drop
+# three new modules into its site-packages `inner/`, and register `"mimo"` in the
+# two registries by APPENDING a line to each module (mutating the live
+# `_HARNESS_MODULES` dict / rebinding the `OMNIGENT_HARNESSES` frozenset at module
+# load — no line-number or sitecustomize fragility, and `uv tool install --force`
+# recreates the venv each run so the appends never accumulate). The harness
+# subprocess inherits `os.environ` (process_manager._build_harness_spawn_env), so
+# `OmnigentSession` passes `HARNESS_MIMO_*` on the `omnigent run --harness mimo`
+# line and they reach `mimo_harness.create_app()` with NO patch to omnigent's own
+# spawn-env builders (which return None for an unknown harness).
+#
+# The overlay modules live in this package under `overlay/`; only the
+# dependency-free `_mimo_acp.py` is import-tested here. `mimo_executor.py` /
+# `mimo_harness.py` import real omnigent internals + fastapi, so they're shipped
+# as source and verified by the install-time import assertion + the live run.
+
+# Dotted entrypoint for omnigent-mimo. Distinct from OMNIGENT_SESSION_FACTORY so
+# the kernel resolves a factory pinned to harness="mimo" without needing the
+# kernel to thread the agent name through.
+OMNIGENT_MIMO_SESSION_FACTORY = "omnigent.agent:build_omnigent_mimo_agent"
+
+# npm package providing the `mimo` CLI binary (OpenCode fork). Pinned.
+_MIMO_NPM_PACKAGE = "@mimo-ai/cli@0.1.1"
+
+# The overlay modules, deployed into omnigent's site-packages `inner/`.
+_OVERLAY_DIR = Path(__file__).parent / "overlay"
+_OVERLAY_FILES = ("_mimo_acp.py", "mimo_executor.py", "mimo_harness.py")
+
+
+def _build_mimo_install_cmd() -> str:
+    """Assemble the in-sandbox install command for omnigent-mimo.
+
+    Reuses omnigent-pi's toolchain bootstrap (node on the bare PATH + tmux + uv +
+    `uv tool install omnigent`), then layers the MiMo overlay: deploy the three
+    `inner/` modules, append the two registry lines (idempotently), provision the
+    `mimo` CLI, and assert the registration actually took (fails the install loud
+    if omnigent's internals drifted under the pin).
+    """
+    # Base64-embed each overlay module's source (read at import time from this
+    # package), mirroring ai-sdk/harness-mimo's server.mjs deploy.
+    deploy_lines = ""
+    for name in _OVERLAY_FILES:
+        b64 = base64.b64encode((_OVERLAY_DIR / name).read_text().encode()).decode()
+        deploy_lines += (
+            f'printf %s {shlex.quote(b64)} | base64 -d > "$OMNI_PKG/inner/{name}"; '
+        )
+
+    # Append-to-module registry registration (idempotent via grep guard). Each
+    # appended statement is its own single-line ``printf`` argument — NEVER an
+    # embedded newline inside one quoted arg — because a real ``\n`` inside the
+    # printf %s argument does not survive shell transport reliably (it can reach
+    # the file as a literal ``\n``, which then SyntaxErrors the patched module).
+    harness_modules_line = '_HARNESS_MODULES["mimo"] = "omnigent.inner.mimo_harness"'
+    # The two compat statements, appended via one ``printf '\n%s\n%s\n'`` with two
+    # separate args (so the newline between them comes from the format, not a
+    # newline embedded in an argument).
+    compat_stmt1 = 'OMNIGENT_HARNESSES = OMNIGENT_HARNESSES | frozenset({"mimo"})'
+    compat_stmt2 = (
+        "_OMNIGENT_ACCEPTED_HARNESSES = OMNIGENT_HARNESSES | OMNIGENT_HARNESS_ALIASES"
+    )
+    # Also register mimo as model-override-capable (its model is routed via env,
+    # like the other SDK harnesses) so Omnigent's server-driven sub-agent dispatch
+    # (`sys_session_send` with a `model`) accepts a mimo child harness — the
+    # single-run BenchFlow path doesn't hit this gate, but a complete harness does.
+    model_override_line = '_SDK_MODEL_OVERRIDE_HARNESSES = _SDK_MODEL_OVERRIDE_HARNESSES | frozenset({"mimo"})'
+
+    # Install-time assertion: all THREE registries carry mimo AND the harness
+    # module imports cleanly (which exercises mimo_executor + _mimo_acp + the
+    # fastapi / ExecutorAdapter wiring inside omnigent's own venv).
+    verify_py = (
+        "from omnigent.spec._omnigent_compat import OMNIGENT_HARNESSES;"
+        "from omnigent.runtime.harnesses import _HARNESS_MODULES;"
+        "from omnigent.model_override import harness_supports_model_override;"
+        "assert 'mimo' in OMNIGENT_HARNESSES, OMNIGENT_HARNESSES;"
+        "assert _HARNESS_MODULES.get('mimo') == 'omnigent.inner.mimo_harness', _HARNESS_MODULES;"
+        "assert harness_supports_model_override('mimo'), 'mimo model-override not registered';"
+        "import importlib; importlib.import_module('omnigent.inner.mimo_harness');"
+        "print('omnigent-mimo overlay OK: mimo registered + harness importable')"
+    )
+
+    return (
+        "set -e; "
+        "export DEBIAN_FRONTEND=noninteractive; "
+        # 1) Isolated Node.js (provides node/npm for the mimo CLI) + bare-PATH symlinks.
+        f"{_NODE_INSTALL}; "
+        f'export PATH="{_BENCHFLOW_NODE_PREFIX}/bin:$PATH"; '
+        "mkdir -p /usr/local/bin; "
+        "for _b in node npm npx; do "
+        f'  if [ -x "{_BENCHFLOW_NODE_PREFIX}/bin/$_b" ]; then '
+        f'    ln -sf "{_BENCHFLOW_NODE_PREFIX}/bin/$_b" /usr/local/bin/$_b; '
+        "  fi; "
+        "done; "
+        # 2) tmux — omnigent's managed REPL terminal hard-fails without it.
+        "if ! command -v tmux >/dev/null 2>&1; then "
+        "  if command -v apt-get >/dev/null 2>&1; then "
+        "    apt-get update -qq && apt-get install -y -qq tmux; "
+        "  elif command -v dnf >/dev/null 2>&1; then dnf -y install tmux; "
+        "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache tmux; "
+        "  fi; "
+        "fi; "
+        "command -v tmux >/dev/null 2>&1 || { echo 'tmux install failed' >&2; exit 1; }; "
+        # 3) uv (idempotent).
+        "if ! command -v uv >/dev/null 2>&1; then "
+        "curl -LsSf https://astral.sh/uv/install.sh | sh; "
+        "fi; "
+        'export PATH="$HOME/.local/bin:$PATH"; '
+        "command -v uv >/dev/null 2>&1 || { echo 'uv install failed' >&2; exit 1; }; "
+        # 4) Stock omnigent in its own uv-tool venv. --python 3.12 for
+        #    cel-expr-python. **--link-mode=copy is REQUIRED**: uv hardlinks
+        #    package files from its shared cache by default, so the overlay's
+        #    append-to-installed-module step (7) would otherwise mutate the CACHED
+        #    file through the shared inode — poisoning every later install (even
+        #    `--force`) with the appended lines. Copy mode gives the venv private
+        #    file copies, so the appends touch only this install and `--force`
+        #    truly recreates a clean tree each run.
+        "mkdir -p /usr/local/bin; "
+        "XDG_BIN_HOME=/usr/local/bin uv tool install --force --link-mode=copy --python 3.12 "
+        f"'omnigent=={OMNIGENT_PIN}' --with 'omnigent-client=={OMNIGENT_PIN}'; "
+        # 5) Locate omnigent's package dir inside the tool venv.
+        'OMNI_PY="$(uv tool dir)/omnigent/bin/python"; '
+        '[ -x "$OMNI_PY" ] || OMNI_PY="$(uv tool dir)/omnigent/bin/python3"; '
+        '[ -x "$OMNI_PY" ] || { echo "omnigent venv python not found" >&2; exit 1; }; '
+        'OMNI_PKG="$("$OMNI_PY" -c "import omnigent,os;print(os.path.dirname(omnigent.__file__))")"; '
+        '[ -d "$OMNI_PKG/inner" ] || { echo "omnigent inner/ not found at $OMNI_PKG" >&2; exit 1; }; '
+        # 6) Deploy the three overlay modules into omnigent/inner/.
+        f"{deploy_lines}"
+        # 7) Register "mimo" in the THREE registries by appending one line each
+        #    (idempotent: skip if already present).
+        'HMOD="$OMNI_PKG/runtime/harnesses/__init__.py"; '
+        f'grep -q \'_HARNESS_MODULES\\["mimo"\\]\' "$HMOD" || '
+        f"printf '\\n%s\\n' {shlex.quote(harness_modules_line)} >> \"$HMOD\"; "
+        'CMPT="$OMNI_PKG/spec/_omnigent_compat.py"; '
+        'grep -q \'frozenset({"mimo"})\' "$CMPT" || '
+        f"printf '\\n%s\\n%s\\n' {shlex.quote(compat_stmt1)} {shlex.quote(compat_stmt2)} >> \"$CMPT\"; "
+        'MOVR="$OMNI_PKG/model_override.py"; '
+        '[ -f "$MOVR" ] && { grep -q \'_SDK_MODEL_OVERRIDE_HARNESSES | frozenset({"mimo"})\' "$MOVR" || '
+        f"printf '\\n%s\\n' {shlex.quote(model_override_line)} >> \"$MOVR\"; }}; "
+        # 8) Provision the mimo CLI globally + symlink onto the bare PATH.
+        f"{_BENCHFLOW_NODE_PREFIX}/bin/npm install -g {shlex.quote(_MIMO_NPM_PACKAGE)}; "
+        f'MIMO_BIN="{_BENCHFLOW_NODE_PREFIX}/bin/mimo"; '
+        'if [ ! -x "$MIMO_BIN" ]; then MIMO_BIN="$(command -v mimo || true)"; fi; '
+        'if [ -n "$MIMO_BIN" ] && [ -x "$MIMO_BIN" ]; then ln -sf "$MIMO_BIN" /usr/local/bin/mimo; fi; '
+        # 9) Verify the whole toolchain + the overlay registration actually took.
+        f'"$OMNI_PY" -c {shlex.quote(verify_py)}; '
+        "omnigent --version; "
+        "which mimo; which node; which tmux"
+    )
+
+
+MIMO_INSTALL_CMD = _build_mimo_install_cmd()
+
+
+def register_mimo():
+    """Register ``omnigent-mimo``; idempotent. Same seam gate as ``omnigent-pi``.
+
+    Returns the created ``AgentConfig`` on success, or ``None`` when the installed
+    BenchFlow lacks the session-factory seam (logs a warning; import stays safe).
+    """
+    if not _session_factory_seam_present():
+        logger.warning(
+            "omnigent-mimo NOT registered: this BenchFlow build lacks the "
+            "session-factory seam (see the omnigent README)."
+        )
+        return None
+
+    config = register_agent(
+        name="omnigent-mimo",
+        description=(
+            "Databricks Omnigent with MiMo Code (OpenCode fork) as a faithful "
+            "`--harness mimo`, run INSIDE the BenchFlow sandbox via the one-shot "
+            "`omnigent run` CLI (non-ACP, session-factory). MiMo's own agent loop "
+            "drives each turn through an install-time overlay (MimoExecutor over "
+            "`mimo acp`); the free `mimo/mimo-auto` channel needs no key."
+        ),
+        install_cmd=MIMO_INSTALL_CMD,
+        launch_cmd="omnigent run --harness mimo",
+        protocol="session-factory",
+        # The free `mimo/mimo-auto` channel is the default — reachable here because
+        # the bare id is sent natively to `mimo acp` (bypassing benchflow provider
+        # resolution, where it would 400). NOTE: omnigent-mimo must run
+        # `usage_tracking="off"` (MiMo rejects the LiteLLM proxy alias); a no-arg
+        # call therefore also needs usage_tracking=off. The flagship
+        # `xiaomi/mimo-v2.5-pro` is opportunistic (XIAOMI_API_KEY/BASE_URL).
+        default_model="mimo/mimo-auto",
+        api_protocol="openai-completions",
+        # MiMo routes via HARNESS_MIMO_* env on the `omnigent run` line (set by
+        # OmnigentSession from the resolved provider routing) — identity
+        # passthrough, same contract documentation as omnigent-pi.
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "BENCHFLOW_PROVIDER_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "BENCHFLOW_PROVIDER_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "BENCHFLOW_PROVIDER_MODEL",
+        },
+        requires_env=[],
+        install_timeout=1800,
+    )
+    config.session_factory = OMNIGENT_MIMO_SESSION_FACTORY
     return config

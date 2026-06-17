@@ -143,10 +143,76 @@ bound is the task's own `[agent] timeout_sec` (the kernel wraps `prompt()` in
 `asyncio.wait_for`); this backstop only sits above it so a hung exec can't run
 unbounded — keep it ≥ your largest task budget.
 
+## `omnigent-mimo` — MiMo Code as a faithful `--harness mimo`
+
+Importing this package **also** registers `omnigent-mimo`: [MiMo Code](https://github.com/XiaomiMiMo)
+(Xiaomi, an OpenCode fork) running as a real Omnigent harness — *MiMo's own agent
+loop drives each turn*, not "Omnigent on the MiMo model."
+
+```python
+import omnigent  # registers omnigent-pi AND omnigent-mimo
+
+await SDK().run(task_path="...", agent="omnigent-mimo", model="mimo/mimo-auto")
+```
+
+Omnigent's `--harness` is a **closed enum** (no plugin seam), so `omnigent-mimo`
+is an **install-time overlay**: it installs stock `omnigent`, drops three modules
+into its site-packages `inner/`, and registers `"mimo"` by appending one line to
+each of the two registries (`_HARNESS_MODULES`, `OMNIGENT_HARNESSES`) — then
+**asserts the registration took** (fails the install loudly if Omnigent's
+internals drifted under the pin). The overlay modules:
+
+- `_mimo_acp.py` — a dependency-free ACP client that drives **`mimo acp`** (MiMo's
+  native JSON-RPC stdio server) and translates `session/update` notifications
+  into backend-neutral events. Unit-tested standalone in this package.
+- `mimo_executor.py` — `MimoExecutor(Executor)`: `run_turn` drives `mimo acp` and
+  yields the Omnigent event vocabulary (`TextChunk`/`ToolCallRequest`/
+  `TurnComplete`…); `handles_tools_internally=True` (MiMo runs its own tools).
+  This is the exact relationship `PiExecutor` has to `pi --mode rpc`.
+- `mimo_harness.py` — `create_app()` = `ExecutorAdapter(MimoExecutor).build()`,
+  the required harness-contract entrypoint registered under `"mimo"`.
+
+### Trackability (raw-LLM capture in proxy mode; native fallback when off)
+
+MiMo (an OpenCode fork) validates model ids against the models.dev catalog and
+won't accept BenchFlow's bare `benchflow-*` proxy alias as a stock model id. But
+that does **not** force `usage_tracking="off"`: in **proxy mode**
+(`usage_tracking != off`) `MimoAcp.start` registers a **custom
+OpenAI-compatible provider** pointed at BenchFlow's usage proxy and routes the
+turn as `benchflow/<safe_model_alias>` (a custom-provider id MiMo *does* accept).
+MiMo then POSTs every agent turn to the proxy, so BenchFlow captures the raw
+prompts + tokens and the kernel writes `trajectory/llm_trajectory.jsonl` — same
+as any proxied agent. Verified on Daytona/citation-check: multiple
+`deepseek-v4-flash` status-200 agent turns (each carrying the `You are MiMoCode`
+system prompt + tool defs), `usage_source=provider_response`, reward 1.0.
+
+The alias is computed by `benchflow.providers.litellm_config.safe_model_alias`
+(imported, with a faithful in-module fallback incl. the >96-char sha1 truncation
+and empty-string cases) so the custom-provider models-map key matches exactly
+what the proxy serves — a mismatch would 404 the inner model.
+
+The free **`mimo/mimo-auto`** channel runs `usage_tracking="off"` (no key, no
+proxy): MiMo talks straight to its own endpoint, so the proxy sees nothing. For
+that path (and to keep the trajectory tool-step-auditable in either mode):
+
+- `MimoExecutor` writes each turn's tool calls + **native ACP usage** to a trace
+  sidecar (`HARNESS_MIMO_TRACE`).
+- `OmnigentSession` (mimo path) reads it back and emits canonical `tool_call`
+  trajectory events (so `n_tool_calls > 0`, and the trajectory is
+  step-auditable — better than `omnigent-pi`'s prompt+final-message coarseness)
+  and reports cumulative native usage via `latest_usage_totals()` (so the
+  rollout's `_collect_native_acp_usage` attributes tokens, `total_tokens > 0`).
+
+The free `mimo/mimo-auto` channel needs no key and is the default verification
+model; `xiaomi/mimo-v2.5-pro` is opportunistic (`XIAOMI_API_KEY`, gateway creds
+routed via a sourced env file so the key never appears in `argv`).
+
+`omnigent-mimo` shares the session-factory seam + x86_64 requirements above.
+
 ## Develop
 
 ```bash
 pip install -e ".[dev]"
 ruff check src tests && ruff format --check src tests
-pytest   # registration tests; skip cleanly on a benchflow without the seam
+pytest   # registration + ACP-bridge + trackability tests; seam-gated ones skip
 ```
