@@ -15,6 +15,7 @@ provider translation beyond a rename) lives in the agent's shim, not the manifes
 
 from __future__ import annotations
 
+import copy
 import json
 import tomllib
 from pathlib import Path
@@ -63,13 +64,15 @@ def load_manifest(path: str | Path) -> dict:
         data = tomllib.loads(path.read_text())
     except tomllib.TOMLDecodeError as e:
         raise ManifestError(f"{path}: invalid TOML: {e}") from e
+    except OSError as e:
+        raise ManifestError(f"{path}: cannot read: {e}") from e
     try:
         jsonschema.validate(data, _SCHEMA)
     except jsonschema.ValidationError as e:
         loc = "/".join(str(p) for p in e.absolute_path) or "<root>"
         raise ManifestError(f"{path}: schema violation at {loc}: {e.message}") from e
     _check_contract_version(data["contract_version"])
-    normalized = {**_DEFAULTS, **data}
+    normalized = {**copy.deepcopy(_DEFAULTS), **data}
     # JSON-Schema integer accepts an integral float (1200.0); the schema already
     # rejected non-integral values (1200.5), so coerce to a real int here.
     if "install_timeout" in normalized:

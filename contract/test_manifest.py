@@ -51,6 +51,18 @@ def test_data_overrides_defaults(tmp_path: Path) -> None:
     assert m["env_mapping"] == {"BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL"}
 
 
+def test_loaded_defaults_are_not_shared_across_loads(tmp_path: Path) -> None:
+    # a manifest without env_mapping/requires_env must get FRESH default mutables;
+    # mutating one load's defaults must not corrupt the module default for the next.
+    first = load_manifest(_write(tmp_path, _MINIMAL))
+    first["env_mapping"]["leaked"] = "x"
+    first["requires_env"].append("LEAKED")
+
+    second = load_manifest(_write(tmp_path, _MINIMAL))
+    assert second["env_mapping"] == {}
+    assert second["requires_env"] == []
+
+
 # ── validation: every malformed/incompatible manifest must raise clearly ──
 
 
@@ -113,6 +125,13 @@ def test_rejects_bad_acp_model_format(tmp_path: Path) -> None:
 def test_rejects_invalid_toml(tmp_path: Path) -> None:
     with pytest.raises(ManifestError, match="invalid TOML"):
         load_manifest(_write(tmp_path, 'name = "x\n'))  # unterminated string
+
+
+def test_missing_file_raises_manifest_error(tmp_path: Path) -> None:
+    # core's discovery scan must see ManifestError (not a bare OSError) for an
+    # absent/unreadable manifest, per the docstring contract.
+    with pytest.raises(ManifestError):
+        load_manifest(tmp_path / "nope.toml")
 
 
 # ── the first real manifest in the repo validates against the contract ──
