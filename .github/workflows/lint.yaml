@@ -28,6 +28,11 @@ jobs:
         run: |
           ruff check src tests
           ruff format --check src tests
+      - name: Lint mimo-acp
+        working-directory: mimo-acp
+        run: |
+          ruff check src tests
+          ruff format --check src tests
       - name: Lint mini-swe-code
         working-directory: mini-swe-code
         run: ruff check src tests
