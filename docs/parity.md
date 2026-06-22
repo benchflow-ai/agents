@@ -17,12 +17,20 @@ node acp_capture.mjs --server <server.mjs> --out /tmp/outside.jsonl   # standalo
 python parity_diff.py /tmp/outside.jsonl /tmp/inside.jsonl
 ```
 
-`parity_diff.py` normalizes **expected-neutral** differences and PASSes only if the
-two requests are otherwise byte-identical. Neutral diffs (verified for `ai-sdk/acp`):
-- gateway **model-alias** rename (same upstream model);
-- sandbox **cwd** vs local in the system prompt / tool-result paths;
+`parity_diff.py` — a thin CLI over the importable
+[`parity`](../skills/adaptation-parity/scripts/parity.py) module (`assert_wire_parity` /
+`compare_outcomes` / `load_capture`, callable from a per-package pytest) — normalizes
+**expected-neutral** differences and PASSes only if the two requests are otherwise
+byte-identical. The neutral diffs are an explicit, load-bearing allowlist
+(`parity.NEUTRAL_DIFFS`):
+- gateway **model-alias** rename — strips only the `benchflow-<provider>-` prefix; the
+  canonical upstream model is still compared, so a **different model fails**;
+- sandbox **cwd** vs local in the system prompt / tool-result paths — `/app` is matched only
+  at a path boundary, and a genuinely different write *directory* under the cwd still differs;
 - prompt trailing whitespace (BenchFlow `.strip()`s the instruction);
-- `content: null` vs omitted on a tool-call turn (LiteLLM stream re-aggregation).
+- `content: null` vs omitted on a tool-call turn (LiteLLM stream re-aggregation);
+- the **byte count** in a write **tool-result** (`wrote N bytes`) — scoped to tool-result
+  content only, so a byte count in assistant prose or tool-call arguments is **not** masked.
 
 Anything else — a changed sampling param, a reshaped tool schema, a dropped field
 the model conditions on — is a real divergence and a FAIL.
