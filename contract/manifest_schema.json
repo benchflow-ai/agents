@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://benchflow.ai/schemas/agent-manifest/v1",
+  "title": "BenchFlow agent manifest (contract v1)",
+  "description": "Data-only declaration of a hosted agent (ADR-0001/0003). Anything requiring code (credential files, config-file emission, provider translation beyond a rename) lives in the agent's shim, not here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "name", "install_cmd", "launch_cmd"],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$",
+      "description": "SemVer MAJOR.MINOR of the {manifest + ACP + proxy-env} contract this agent targets."
+    },
+    "name": {"type": "string", "minLength": 1, "description": "Unique agent id."},
+    "description": {"type": "string"},
+    "protocol": {
+      "type": "string",
+      "enum": ["acp"],
+      "description": "The single host kind. Non-ACP platforms are wrapped in an ACP-stdio shim."
+    },
+    "api_protocol": {"type": "string", "description": "Provider surface, e.g. openai-completions."},
+    "install_cmd": {"type": "string", "minLength": 1, "description": "Idempotent bash run once in the sandbox before connection."},
+    "launch_cmd": {"type": "string", "minLength": 1, "description": "The ACP-over-stdio process benchflow spawns."},
+    "install_timeout": {"type": "integer", "minimum": 1},
+    "env_mapping": {
+      "type": "object",
+      "additionalProperties": {"type": "string"},
+      "description": "Declarative renames from canonical BENCHFLOW_PROVIDER_* to the agent's native vars. File-config translation belongs in the shim."
+    },
+    "acp_model_format": {
+      "type": "string",
+      "enum": ["bare", "provider/model", "registered-provider/model"]
+    },
+    "supports_acp_set_model": {"type": "boolean"},
+    "default_model": {"type": "string"},
+    "skill_paths": {"type": "array", "items": {"type": "string"}},
+    "home_dirs": {"type": "array", "items": {"type": "string"}},
+    "requires_env": {"type": "array", "items": {"type": "string"}},
+    "aliases": {"type": "array", "items": {"type": "string"}}
+  }
+}
