@@ -130,3 +130,9 @@ def test_register_wires_session_factory_with_seam() -> None:
     assert config.session_factory == OMNIGENT_SESSION_FACTORY
     # resolvable by name through the public registry.
     assert resolve_agent("omnigent-pi").session_factory == OMNIGENT_SESSION_FACTORY
+    # pi skill-discovery dirs registered so the with/without-skills axis is real
+    # (core deploy_skills symlinks /skills into these only when skill_paths is set).
+    assert config.skill_paths == [
+        "$HOME/.pi/agent/skills",
+        "$HOME/.agents/skills",
+    ]

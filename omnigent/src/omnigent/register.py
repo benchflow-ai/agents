@@ -238,6 +238,10 @@ def register():
         },
         # Gateway URL/key resolved from the provider at runtime.
         requires_env=[],
+        # pi's task-skill discovery dirs. Core's deploy_skills symlinks the run's
+        # /skills into these when skills are enabled; without registering them the
+        # with/without-skills axis is a no-op (pi never sees the injected skills).
+        skill_paths=["$HOME/.pi/agent/skills", "$HOME/.agents/skills"],
     )
     # Non-ACP field — set after construction so the core AgentConfig schema
     # change stays minimal (one optional field; see benchflow registry.py).

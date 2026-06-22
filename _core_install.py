@@ -1,0 +1,338 @@
+"""Agent provisioning inside the sandbox: install + skill deployment.
+
+Owns the "prepare the sandbox for the agent" phase that runs once,
+sequentially, before ACP connection:
+
+    install_agent  → registry-driven install_cmd, captures stdout, raises
+                     AgentInstallError on non-zero return code
+    deploy_skills  → runtime skill upload (Dockerfile-mount fallback) and
+                     distribution into agent-specific discovery paths
+
+Together they form the install → distribute lifecycle that the SDK loop
+runs as: install_agent → deploy_skills → connect_acp → execute_prompts.
+
+Does not own:
+    - Agent / provider env vars — see _agent_env.py
+    - Credential file writing — see _credentials.py
+"""
+
+import logging
+import shlex
+from pathlib import Path
+
+from benchflow.agents.registry import AGENT_INSTALLERS, AGENTS, AgentConfig
+from benchflow.models import AgentInstallError
+from benchflow.skill_policy import validate_container_mount_path
+
+logger = logging.getLogger(__name__)
+
+_ORACLE_SKILL_PATHS = [
+    "$HOME/.claude/skills",
+    "$HOME/.codex/skills",
+    "$HOME/.opencode/skills",
+    "$HOME/.agents/skills",
+    "$WORKSPACE/skills",
+]
+
+
+def _intermediate_dirs(prefix: str, leaf: str) -> list[str]:
+    """Dirs strictly under prefix down to leaf inclusive, in creation order.
+
+    `mkdir -p {leaf}` creates every missing ancestor as root, but only the
+    dirs returned here get chowned. Without the full chain, pi-acp's
+    `mkdir ~/.pi/pi-acp` for session state hits EACCES on a root-owned
+    `~/.pi/`.
+    """
+    base = prefix.rstrip("/")
+    if not leaf.startswith(base + "/"):
+        return []
+    rel = leaf[len(base) + 1 :]
+    if not rel:
+        return []
+    out: list[str] = []
+    cur = base
+    for seg in rel.split("/"):
+        cur = f"{cur}/{seg}"
+        out.append(cur)
+    return out
+
+
+def _skill_link_cmd(
+    source: str,
+    dest: str,
+    sandbox_user: str | None,
+    chown_chain: list[str],
+) -> str:
+    """Link a shared skills tree into an agent discovery path.
+
+    When sandbox_user is set, mkdir runs as root and every newly-created
+    dir in chown_chain is chowned so the agent can later write into them.
+    Guards the fix for issue #7 — root-owned `~/.pi/` blocking pi-acp's
+    session-state mkdir.
+    """
+    if source == dest:
+        q_dest = shlex.quote(dest)
+        if sandbox_user and chown_chain:
+            q_user = shlex.quote(sandbox_user)
+            q_dirs = " ".join(shlex.quote(d) for d in chown_chain)
+            return f"mkdir -p {q_dest} && chown {q_user}:{q_user} {q_dirs}"
+        return f"mkdir -p {q_dest}"
+
+    parent = shlex.quote(str(Path(dest).parent))
+    q_source = shlex.quote(source)
+    q_dest = shlex.quote(dest)
+    chown = ""
+    if sandbox_user and chown_chain:
+        q_user = shlex.quote(sandbox_user)
+        q_dirs = " ".join(shlex.quote(d) for d in chown_chain)
+        chown = f"chown {q_user}:{q_user} {q_dirs} && "
+    return f"mkdir -p {parent} && {chown}rm -rf {q_dest} && ln -sfn {q_source} {q_dest}"
+
+
+def _owner_from_home(home: str) -> str | None:
+    """Infer the sandbox user for normal /home/<user> agent homes."""
+    parts = Path(home).parts
+    if len(parts) == 3 and parts[0] == "/" and parts[1] == "home":
+        return parts[2]
+    return None
+
+
+def _policy_home_dirs(agent: str, agent_cfg: AgentConfig) -> list[str]:
+    """Agent home dirs a no-web setup command may create."""
+    dirs = set(agent_cfg.home_dirs)
+    for owned_path in agent_cfg.disallow_web_tools_owned_paths:
+        if not owned_path.startswith("$HOME/"):
+            raise ValueError(
+                f"disallow_web_tools_owned_paths entry {owned_path!r} must start with $HOME/"
+            )
+        rel = owned_path.removeprefix("$HOME/").rstrip("/")
+        if rel:
+            dirs.add(rel)
+    for skill_path in agent_cfg.skill_paths:
+        if skill_path.startswith("$HOME/"):
+            rel = skill_path.removeprefix("$HOME/")
+            top = rel.split("/", 1)[0]
+            if top:
+                dirs.add(top)
+    if not dirs:
+        dirs.add(f".{agent}")
+    return sorted(dirs)
+
+
+async def _link_skill_paths(
+    env,
+    source: str,
+    skill_paths: list[str],
+    home: str,
+    cwd: str,
+    sandbox_user: str | None,
+) -> int:
+    """Link one shared skills tree into each configured discovery path."""
+    _VALID_PREFIXES = ("$HOME/", "$WORKSPACE/")
+    for sp in skill_paths:
+        if not any(sp.startswith(p) for p in _VALID_PREFIXES):
+            raise ValueError(f"skill_path {sp!r} must start with $HOME/ or $WORKSPACE/")
+
+    parts = []
+    for sp in skill_paths:
+        prefix = home if sp.startswith("$HOME/") else cwd
+        expanded = sp.replace("$HOME", home).replace("$WORKSPACE", cwd)
+        leaf = expanded if source == expanded else str(Path(expanded).parent)
+        chain = _intermediate_dirs(prefix, leaf) if sandbox_user else []
+        parts.append(_skill_link_cmd(source, expanded, sandbox_user, chain))
+    if parts:
+        cmd = " && ".join(parts)
+        result = await env.exec(cmd, timeout_sec=15)
+        if result.return_code != 0:
+            stdout = (getattr(result, "stdout", "") or "").strip()
+            stderr = (getattr(result, "stderr", "") or "").strip()
+            details = [
+                f"exit code {result.return_code}",
+                f"command: {cmd}",
+            ]
+            if stdout:
+                details.append(f"stdout: {stdout}")
+            if stderr:
+                details.append(f"stderr: {stderr}")
+            raise RuntimeError(
+                f"Failed to link skills from {source}: {'; '.join(details)}"
+            )
+    return len(parts)
+
+
+def effective_install_timeout(
+    agent: str, sandbox_setup_timeout: int = 120
+) -> int | None:
+    """Timeout enforced for the agent install step, or None when no install runs.
+
+    Single source of truth shared by :func:`install_agent` and the
+    ``config.json`` recorder, so the recorded value always equals the enforced
+    one: a per-agent registry ``install_timeout`` overrides the configured
+    ``sandbox_setup_timeout``.
+    """
+    agent_base = agent.split()[0]
+    if agent_base not in AGENT_INSTALLERS:
+        return None
+    agent_cfg = AGENTS.get(agent_base)
+    if agent_cfg is None:
+        # Defensive fallback, not dead code: an installer can live in
+        # AGENT_INSTALLERS without a matching AGENTS entry (e.g. one injected
+        # directly into the derived install table by external tooling). The
+        # built-in registry keeps the two maps in lockstep, but when they
+        # diverge we still bound the install by the configured sandbox setup
+        # timeout rather than leaving it unbounded. Covered by
+        # test_effective_install_timeout_branches / the fake-agent fallback test.
+        return sandbox_setup_timeout
+    return agent_cfg.install_timeout
+
+
+async def install_agent(
+    env, agent: str, rollout_dir: Path, sandbox_setup_timeout: int = 120
+) -> AgentConfig | None:
+    """Install agent in sandbox and return its config."""
+    agent_base = agent.split()[0]
+    agent_cfg = AGENTS.get(agent_base)
+    if agent_base not in AGENT_INSTALLERS:
+        return agent_cfg
+    install_cmd = AGENT_INSTALLERS[agent_base]
+    install_timeout = effective_install_timeout(agent, sandbox_setup_timeout)
+    logger.info(f"Installing {agent_base} in sandbox (timeout={install_timeout}s)...")
+    install_result = await env.exec(
+        install_cmd,
+        timeout_sec=install_timeout,
+    )
+    install_log = rollout_dir / "agent" / "install-stdout.txt"
+    install_log.parent.mkdir(parents=True, exist_ok=True)
+    stdout = install_result.stdout or ""
+    stderr = install_result.stderr or ""
+    parts = [f"$ {install_cmd}\n"]
+    if stdout:
+        parts.append("=== stdout ===\n")
+        parts.append(stdout)
+        if not stdout.endswith("\n"):
+            parts.append("\n")
+    if stderr:
+        parts.append("=== stderr ===\n")
+        parts.append(stderr)
+        if not stderr.endswith("\n"):
+            parts.append("\n")
+    install_log.write_text("".join(parts))
+    if install_result.return_code != 0:
+        diag = await env.exec(
+            "echo 'OS:' && cat /etc/os-release 2>/dev/null | head -2; "
+            "echo 'Node:' && node --version 2>&1; "
+            f"echo 'Agent:' && which {agent_base} 2>&1",
+            timeout_sec=10,
+        )
+        raise AgentInstallError(
+            agent=agent_base,
+            return_code=install_result.return_code,
+            stdout="".join(parts),
+            diagnostics=diag.stdout or "",
+            log_path=str(install_log),
+        )
+    return agent_cfg
+
+
+async def apply_web_tool_policy(
+    env,
+    agent: str,
+    agent_cfg: AgentConfig | None,
+    home: str,
+    *,
+    disallow: bool,
+) -> None:
+    """Apply an agent-specific hard web-tool disable in the agent home."""
+    if not disallow or not agent_cfg or not agent_cfg.disallow_web_tools_setup_cmd:
+        return
+
+    cmd = (
+        f"export BENCHFLOW_AGENT_HOME={shlex.quote(home)}; "
+        f"{agent_cfg.disallow_web_tools_setup_cmd}"
+    )
+    owner = _owner_from_home(home)
+    if owner:
+        q_owner = shlex.quote(owner)
+        chowns = []
+        for dirname in _policy_home_dirs(agent, agent_cfg):
+            path = f"{home.rstrip('/')}/{dirname}"
+            q_path = shlex.quote(path)
+            chowns.append(
+                f"if [ -e {q_path} ]; then chown -R {q_owner}:{q_owner} {q_path}; fi"
+            )
+        if chowns:
+            cmd = f"{cmd} && {' && '.join(chowns)}"
+    result = await env.exec(cmd, timeout_sec=15)
+    if result.return_code != 0:
+        stdout = (getattr(result, "stdout", "") or "").strip()
+        stderr = (getattr(result, "stderr", "") or "").strip()
+        details = [f"exit code {result.return_code}", f"command: {cmd}"]
+        if stdout:
+            details.append(f"stdout: {stdout}")
+        if stderr:
+            details.append(f"stderr: {stderr}")
+        raise RuntimeError(
+            f"Failed to apply no-web policy for {agent}: {'; '.join(details)}"
+        )
+
+
+async def deploy_skills(
+    env,
+    task_path: Path,
+    skills_dir: str | Path | None,
+    agent_cfg,
+    sandbox_user: str | None,
+    agent_cwd: str,
+    skills_sandbox_dir: str | None = None,
+) -> None:
+    """Deploy and distribute skills into sandbox."""
+    target_skills_dir = (
+        validate_container_mount_path(skills_sandbox_dir or "/skills")
+        if skills_dir or skills_sandbox_dir
+        else None
+    )
+    effective_skills = target_skills_dir if skills_sandbox_dir else None
+
+    # Runtime upload (fallback if not baked into Dockerfile)
+    if skills_dir:
+        assert target_skills_dir is not None
+        dockerfile = task_path / "environment" / "Dockerfile"
+        injected_copy = f"COPY _deps/skills {target_skills_dir.rstrip('/')}/"
+        already_injected = (
+            dockerfile.exists() and injected_copy in dockerfile.read_text()
+        )
+        if not already_injected:
+            skills_path = Path(skills_dir)
+            if skills_path.is_dir():
+                logger.info(f"Deploying skills via runtime upload from {skills_path}")
+                await env.upload_dir(skills_path, target_skills_dir)
+                logger.info("Skills deployed to %s", target_skills_dir)
+                effective_skills = target_skills_dir
+            else:
+                logger.warning(f"Skills dir not found: {skills_path}")
+        else:
+            logger.info("Skills already injected via Dockerfile")
+            effective_skills = target_skills_dir
+
+    # Distribute to agent-specific discovery paths
+    if agent_cfg is not None:
+        skill_paths = agent_cfg.skill_paths
+    else:
+        skill_paths = _ORACLE_SKILL_PATHS
+    if effective_skills and skill_paths:
+        if agent_cfg is None:
+            home = "/root"
+        else:
+            home = f"/home/{sandbox_user}" if sandbox_user else "/root"
+        count = await _link_skill_paths(
+            env,
+            effective_skills,
+            skill_paths,
+            home,
+            agent_cwd,
+            sandbox_user,
+        )
+        label = agent_cfg.name if agent_cfg else "oracle"
+        if count:
+            logger.info(f"Skills distributed to {count} paths for {label}")
+
