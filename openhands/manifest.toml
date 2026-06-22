@@ -1,0 +1,25 @@
+contract_version = "1.0"
+name = "openhands"
+description = "OpenHands agent via ACP (multi-model, Python-based)"
+install_cmd = "export DEBIAN_FRONTEND=noninteractive && export PATH=\"$HOME/.local/bin:$PATH\" && ( command -v curl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 ||   if command -v apt-get >/dev/null 2>&1; then     ( attempt=1; while [ \"$attempt\" -le 3 ]; do rm -rf /var/lib/apt/lists/*; apt-get clean; if apt-get -o Acquire::Retries=3 update -qq && apt-get -o Acquire::Retries=3 install -y -qq curl ca-certificates git; then exit 0; fi; case \"$attempt\" in 1) sleep 2; attempt=2 ;; 2) sleep 4; attempt=3 ;; *) sleep 6; attempt=4 ;; esac; done; exit 1 );   elif command -v dnf >/dev/null 2>&1; then     dnf -y --allowerasing install curl ca-certificates git >/dev/null 2>&1;   elif command -v apk >/dev/null 2>&1; then     apk add --no-cache curl ca-certificates git >/dev/null 2>&1;   else     echo 'OpenHands GitHub install requires curl and git' >&2;     exit 127;   fi ) && ( UV_OK=0;   if command -v uv >/dev/null 2>&1; then     UV_VER=$(uv --version 2>/dev/null | awk '{print $2}');     if [ -n \"$UV_VER\" ] &&        [ \"$(printf '%s\\n' 0.11.6 \"$UV_VER\" | sort -V | head -n1)\" = \"0.11.6\" ]; then       UV_OK=1;     fi;   fi;   if [ \"$UV_OK\" = 0 ]; then     curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 &&     export PATH=\"$HOME/.local/bin:$PATH\";   fi && printf 'openhands-sdk==1.22.1\\nopenhands-tools==1.22.1\\n' > /tmp/oh-sdk-overrides.txt && uv tool install --force --refresh --overrides /tmp/oh-sdk-overrides.txt --from 'git+https://github.com/OpenHands/OpenHands-CLI.git@3ca17446c5d9c1e35e054803478a3501ec251ecf' openhands --python 3.12 &&   uv tool list | grep -q '^openhands\\b' ) && chmod o+x /root /root/.local /root/.local/share /root/.local/share/uv /root/.local/share/uv/tools 2>/dev/null; mkdir -p ~/.openhands && echo '{\"llm\":{\"model\":\"placeholder\",\"api_key\":\"placeholder\"}}' > ~/.openhands/agent_settings.json && command -v openhands >/dev/null 2>&1"
+launch_cmd = "export PATH=\"$HOME/.local/bin:$PATH\" && mkdir -p ~/.openhands && { printf '{\"llm\":{\"model\":\"%s\",\"api_key\":\"%s\"' \"$LLM_MODEL\" \"$LLM_API_KEY\"; if [ -n \"$LLM_BASE_URL\" ]; then printf ',\"base_url\":\"%s\"' \"$LLM_BASE_URL\"; fi; if [ -n \"$LLM_API_VERSION\" ]; then printf ',\"api_version\":\"%s\"' \"$LLM_API_VERSION\"; fi; printf '}}'; } > ~/.openhands/agent_settings.json && openhands acp --always-approve --override-with-envs"
+protocol = "acp"
+supports_acp_set_model = false
+requires_env = [
+    "LLM_API_KEY",
+]
+skill_paths = [
+    "$HOME/.agents/skills",
+    "$WORKSPACE/.agents/skills",
+]
+home_dirs = [
+    ".openhands",
+]
+aliases = [
+    "oh",
+    "openhands",
+]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_BASE_URL = "LLM_BASE_URL"
+BENCHFLOW_PROVIDER_API_KEY = "LLM_API_KEY"
