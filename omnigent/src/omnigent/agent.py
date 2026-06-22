@@ -161,6 +161,12 @@ class OmnigentAgent:
         model = _read("BENCHFLOW_PROVIDER_MODEL")
         base_url = _normalize_base_url(_read("BENCHFLOW_PROVIDER_BASE_URL"))
         api_key = _read("BENCHFLOW_PROVIDER_API_KEY")
+        # The kernel mints BENCHFLOW_AGENT_CWD = the resolved per-rollout
+        # workspace (the same dir ACP agents run in and the verifier reads). Run
+        # `omnigent run` there instead of a hardcoded path so the harness behaves
+        # like any other benchflow-hosted agent. Falls back to the session
+        # default when the kernel did not resolve a cwd (older core / unit tests).
+        agent_cwd = _read("BENCHFLOW_AGENT_CWD") or None
 
         config_yaml = _build_config_yaml(
             base_url=base_url, api_key=api_key, model=model
@@ -197,6 +203,7 @@ class OmnigentAgent:
             sandbox,
             model=model,
             exec_user=self._exec_user,
+            cwd=agent_cwd,
         )
 
 
