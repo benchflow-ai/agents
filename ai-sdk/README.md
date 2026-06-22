@@ -27,3 +27,7 @@ the AI SDK agent, registered via `register.py` (public `register_agent`). The
 
 New AI SDK agent? Scaffold from `acp`:
 `python ../skills/adaptation-parity/scripts/scaffold_ai_sdk_agent.py <name>`.
+
+## harness-mimo (MiMo Code)
+
+`HarnessAgent` driving MiMo's **native** `mimo acp` via a thin custom `HarnessV1` adapter (no vendor `@ai-sdk/harness-<x>`, no JS-library wrap). Runs in-sandbox with the FS bridge, so it reads task input files AND writes outputs to the task cwd. Run `usage_tracking="off"`; free `mimo/mimo-auto` needs no key. See [harness-mimo/](harness-mimo/).
