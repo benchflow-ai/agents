@@ -57,10 +57,15 @@ def _cwd_from_messages(messages: list[dict]) -> str | None:
 
 def _sub_cwd(text: str, cwd: str | None) -> str:
     if cwd:
-        # `cwd` is the request's own absolute task dir — a long, unique multi-segment
-        # path that also appears in prose followed by '.', a space, or EOL — so an
-        # unanchored replace is correct here and not collision-prone for real cwds.
-        text = text.replace(cwd, "<CWD>")
+        # `cwd` is the request's own absolute task dir. It appears in prose followed
+        # by '.', a space, or EOL AND as a real path prefix ("<cwd>/sub"), so we
+        # anchor on "not extended into a longer path SEGMENT" — i.e. the next char is
+        # not an alphanumeric. That keeps the prose/period/space/EOL collapses while
+        # refusing to corrupt a longer UNRELATED path that merely starts with the cwd
+        # string (cwd="/app" must NOT turn "/application/..." into "<CWD>lication/..."),
+        # which an unanchored replace would, raising a FALSE parity FAIL on equivalent
+        # agents.
+        text = re.sub(rf"{re.escape(cwd)}(?![A-Za-z0-9])", "<CWD>", text)
     # `/app` is a fixed sandbox-root TOKEN, so it IS boundary-anchored (next char /,
     # quote, or end) — never collapse it inside an unrelated token like /application.
     return re.sub(r"/app(?=[/\"']|$)", "<CWD>", text)

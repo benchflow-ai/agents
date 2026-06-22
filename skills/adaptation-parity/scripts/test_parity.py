@@ -81,6 +81,32 @@ def test_app_substring_not_overcollapsed() -> None:
     assert "/application/data.json" in out["messages"][0]["content"]
 
 
+def test_cwd_replace_is_path_boundary_anchored() -> None:
+    """When the request's own cwd is itself a prefix of a longer unrelated path,
+    the cwd replace must be path-boundary-anchored — exactly like the /app token.
+
+    Regression: an UNANCHORED ``text.replace(cwd, "<CWD>")`` corrupts a longer
+    path that merely starts with the cwd string (cwd="/app" turns the unrelated
+    "/application/data" into "<CWD>lication/data"), which the vanilla side (a
+    different/absent cwd) keeps verbatim -> a FALSE parity FAIL on equivalent
+    agents. The standalone cwd token must still collapse to <CWD>.
+    """
+    body = {
+        "model": "m",
+        "messages": [
+            {"role": "system", "content": "working directory /app."},
+            {"role": "tool", "content": "read /app/data and /application/cfg"},
+        ],
+    }
+    out = normalize_request(body)
+    content = out["messages"][1]["content"]
+    # the unrelated longer path is preserved, NOT corrupted to "<CWD>lication/cfg"
+    assert "/application/cfg" in content
+    assert "<CWD>lication/cfg" not in content
+    # the real cwd path (boundary-anchored: next char '/') still collapses
+    assert "<CWD>/data" in content
+
+
 def test_normalize_collapses_prompt_trailing_whitespace() -> None:
     a = {"model": "m", "messages": [{"role": "user", "content": "do the task"}]}
     b = {"model": "m", "messages": [{"role": "user", "content": "do the task   \n"}]}
