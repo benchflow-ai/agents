@@ -1,7 +1,7 @@
 """Freshness test: the pi-acp manifest's embedded launcher must track core.
 
 agents#17 hand-embedded the *pre-#831* ``pi_acp_launcher.py`` into
-``pi-acp/manifest.toml``. That launcher hardcoded ``_DEFAULT_MAX_TOKENS = 16384``
+``acp/pi-acp/manifest.toml``. That launcher hardcoded ``_DEFAULT_MAX_TOKENS = 16384``
 — the #829 bug: some OpenAI-compatible providers reject a 16k ``max_tokens`` and
 the agent falls into a retry storm. benchflow#831 hardened core to cap the
 fallback completion budget at 4096 (1/4 of the context window, whichever is
@@ -22,7 +22,7 @@ import types
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_MANIFEST = _REPO_ROOT / "pi-acp" / "manifest.toml"
+_MANIFEST = _REPO_ROOT / "acp" / "pi-acp" / "manifest.toml"
 
 # install_cmd hand-embeds the launcher as:
 #   echo <BLOB> | base64 -d > /opt/benchflow/bin/pi-acp-launcher

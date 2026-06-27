@@ -19,7 +19,7 @@ jobs:
       - name: Install ruff
         run: pip install ruff==0.15.15
       - name: Lint mini-swe-acp
-        working-directory: mini-swe-acp
+        working-directory: acp/mini-swe-acp
         run: |
           ruff check src tests
           ruff format --check src tests
@@ -29,12 +29,12 @@ jobs:
           ruff check src tests
           ruff format --check src tests
       - name: Lint mimo-acp
-        working-directory: mimo-acp
+        working-directory: acp/mimo-acp
         run: |
           ruff check src tests
           ruff format --check src tests
       - name: Lint mini-swe-code
-        working-directory: mini-swe-code
+        working-directory: acp/mini-swe-code
         run: ruff check src tests
       - name: Lint omnigent
         working-directory: omnigent

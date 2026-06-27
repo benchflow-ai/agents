@@ -7,12 +7,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'mini-swe-code/**'
+      - 'acp/mini-swe-code/**'
       - '.github/workflows/test-mini-swe-code.yaml'
   pull_request:
     branches: [main]
     paths:
-      - 'mini-swe-code/**'
+      - 'acp/mini-swe-code/**'
       - '.github/workflows/test-mini-swe-code.yaml'
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
     defaults:
       run:
         shell: bash -l {0}
-        working-directory: mini-swe-code
+        working-directory: acp/mini-swe-code
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

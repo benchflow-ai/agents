@@ -138,9 +138,11 @@ def test_missing_file_raises_manifest_error(tmp_path: Path) -> None:
 
 
 def test_repo_manifests_validate() -> None:
-    """Every agents/<name>/manifest.toml shipped in the repo must load clean."""
+    """Every <category>/<name>/manifest.toml shipped in the repo (e.g. acp/<name>/) must load clean."""
     repo_root = Path(__file__).resolve().parents[1]
-    manifests = sorted(repo_root.glob("*/manifest.toml"))
+    manifests = sorted(
+        {*repo_root.glob("*/manifest.toml"), *repo_root.glob("*/*/manifest.toml")}
+    )
     if not manifests:
         pytest.skip("no agent manifests in the repo yet")
     for mf in manifests:
