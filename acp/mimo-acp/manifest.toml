@@ -1,5 +1,5 @@
 contract_version = "1.0"
-name = "mimo"
+name = "mimo-acp"
 description = "MiMo Code (Xiaomi, OpenCode fork) native `mimo acp` ACP server via the `mimo` CLI — no server.mjs (mimo is the ACP server)"
 protocol = "acp"
 api_protocol = "openai-completions"
