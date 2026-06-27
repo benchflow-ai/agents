@@ -4,12 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'mini-swe-acp/**'
+      - 'acp/mini-swe-acp/**'
       - '.github/workflows/test-mini-swe-acp.yaml'
   pull_request:
     branches: [main]
     paths:
-      - 'mini-swe-acp/**'
+      - 'acp/mini-swe-acp/**'
       - '.github/workflows/test-mini-swe-acp.yaml'
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     defaults:
       run:
         shell: bash -l {0}
-        working-directory: mini-swe-acp
+        working-directory: acp/mini-swe-acp
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

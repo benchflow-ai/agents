@@ -7,7 +7,7 @@ is no eval-only reimplementation (that's the [eval↔prod-gap](../README.md) poi
 
 Worked examples: [`ai-sdk/acp`](../ai-sdk/acp) (AI SDK `ToolLoopAgent`),
 [`ai-sdk/harness-pi`](../ai-sdk/harness-pi) (AI SDK 7 `HarnessAgent`),
-[`mini-swe-acp`](../mini-swe-acp) (a Python harness shim).
+[`mini-swe-acp`](../acp/mini-swe-acp) (a Python harness shim).
 
 ## Two files
 

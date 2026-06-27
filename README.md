@@ -39,10 +39,10 @@ you want to both ship and benchmark.
 
 | Family | Agents | Eval on BenchFlow |
 |---|---|---|
-| [**mini-swe**](mini-swe-code/) | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) behind opencode's TUI ([mini-swe-code](mini-swe-code/)) + an ACP shim ([mini-swe-acp](mini-swe-acp/)) | ✅ stable — faithful SWE-agent harness (>74% SWE-bench verified) |
+| [**mini-swe**](acp/mini-swe-code/) | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) behind opencode's TUI ([mini-swe-code](acp/mini-swe-code/)) + an ACP shim ([mini-swe-acp](acp/mini-swe-acp/)) | ✅ stable — faithful SWE-agent harness (>74% SWE-bench verified) |
 | [**ai-sdk**](ai-sdk/) | the Vercel AI SDK agent surface — `ToolLoopAgent` ([acp](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/)} | mixed — `acp` ✅ (parity byte-verified), `harness-pi` ✅ (file tasks), `codex`/`claude-code` 🧪 (need a Vercel sandbox). Per-agent maturity in [ai-sdk/README](ai-sdk/README.md). |
 | [**omnigent**](omnigent/) | [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents) `pi` meta-harness — the first **non-ACP** agent here: rides BenchFlow's Session path via a `session_factory`, shelling `omnigent run` inside the sandbox | ✅ reward 1.0 on hello-world **and** the real `citation-check` research task (DeepSeek/Daytona x86_64). Needs a BenchFlow with the session-factory seam — see [omnigent/README](omnigent/README.md). |
-| [**mimo**](mimo-acp/) | [MiMo Code](https://mimo.xiaomi.com/mimocode) (Xiaomi, an OpenCode fork) — its `mimo` CLI ships a **native** `mimo acp` server, registered out-of-core ([mimo-acp](mimo-acp/)); no `server.mjs` (mimo *is* the ACP server), structurally like `mini-swe-acp` | ✅ the free `mimo/mimo-auto` channel runs headless. The flagship `xiaomi/mimo-v2.5-pro` (reward 1.0 on `citation-check`) is the native `mimo` agent in benchflow core — `bare` strips the `xiaomi/` prefix here. |
+| [**mimo**](acp/mimo-acp/) | [MiMo Code](https://mimo.xiaomi.com/mimocode) (Xiaomi, an OpenCode fork) — its `mimo` CLI ships a **native** `mimo acp` server, registered out-of-core ([mimo-acp](acp/mimo-acp/)); no `server.mjs` (mimo *is* the ACP server), structurally like `mini-swe-acp` | ✅ the free `mimo/mimo-auto` channel runs headless. The flagship `xiaomi/mimo-v2.5-pro` (reward 1.0 on `citation-check`) is the native `mimo` agent in benchflow core — `bare` strips the `xiaomi/` prefix here. |
 
 Each agent is a self-contained package: a production runtime + a thin adapter
 (ACP, or BenchFlow's non-ACP Session path for `omnigent`) registered via the
@@ -79,7 +79,7 @@ methodology in [docs/parity.md](docs/parity.md).
 **Drive an agent interactively (mini-swe-code):**
 
 ```bash
-cd mini-swe-code
+cd acp/mini-swe-code
 uv venv .venv && source .venv/bin/activate
 uv pip install -e ".[opencode]"
 export ANTHROPIC_API_KEY="<your-key>"   # or OPENAI_API_KEY / GEMINI_API_KEY / ...
@@ -94,7 +94,7 @@ mini-opencode --attach --cwd /tmp/mini-swe-scratch
 **Benchmark an agent (mini-swe-acp):**
 
 ```bash
-pip install "mini-swe-acp @ git+https://github.com/benchflow-ai/agents#subdirectory=mini-swe-acp"
+pip install "mini-swe-acp @ git+https://github.com/benchflow-ai/agents#subdirectory=acp/mini-swe-acp"
 ```
 
 ```python
@@ -104,15 +104,16 @@ await SDK().run(task_path="...", agent="mini-swe", model="openai/gpt-4o-mini")
 ```
 
 Per-agent setup, design notes, and caveats live in each package's README:
-[mini-swe-code](mini-swe-code/README.md) ·
-[mini-swe-acp](mini-swe-acp/README.md) ·
+[mini-swe-code](acp/mini-swe-code/README.md) ·
+[mini-swe-acp](acp/mini-swe-acp/README.md) ·
 [ai-sdk/*](ai-sdk/README.md).
 
 ## Repository layout
 
 ```text
-mini-swe-code/    mini-swe-agent distribution + opencode TUI (CLIs: mini, mini-opencode)
-mini-swe-acp/     mini-swe-agent as a BenchFlow ACP agent
+acp/              ACP agents, each a self-contained package — e.g.:
+  mini-swe-code/    mini-swe-agent distribution + opencode TUI (CLIs: mini, mini-opencode)
+  mini-swe-acp/     mini-swe-agent as a BenchFlow ACP agent
 ai-sdk/           Vercel AI SDK agents: acp, harness-pi, harness-codex, harness-claude-code
 omnigent/         Databricks Omnigent pi meta-harness as a non-ACP (session-factory) BenchFlow agent
 skills/           adaptation-parity skill — adapt an agent + verify eval/prod parity
@@ -138,8 +139,8 @@ Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). High-value no
 
 | Path | License |
 |---|---|
-| repository root, `mini-swe-acp/`, `ai-sdk/`, `omnigent/`, `skills/` | [Apache-2.0](LICENSE) |
-| `mini-swe-code/` | [MIT](mini-swe-code/LICENSE.md) (upstream mini-swe-agent license, kept verbatim) |
+| repository root, `acp/mini-swe-acp/`, `ai-sdk/`, `omnigent/`, `skills/` | [Apache-2.0](LICENSE) |
+| `acp/mini-swe-code/` | [MIT](acp/mini-swe-code/LICENSE.md) (upstream mini-swe-agent license, kept verbatim) |
 
 ## Acknowledgments
 

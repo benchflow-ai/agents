@@ -4,12 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - 'mimo-acp/**'
+      - 'acp/mimo-acp/**'
       - '.github/workflows/test-mimo-acp.yaml'
   pull_request:
     branches: [main]
     paths:
-      - 'mimo-acp/**'
+      - 'acp/mimo-acp/**'
       - '.github/workflows/test-mimo-acp.yaml'
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     defaults:
       run:
         shell: bash -l {0}
-        working-directory: mimo-acp
+        working-directory: acp/mimo-acp
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

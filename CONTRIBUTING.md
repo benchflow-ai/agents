@@ -13,7 +13,7 @@ skill (`docs/adaptation.md`, `docs/parity.md`).
 ### mini-swe-acp (Python ≥3.12)
 
 ```bash
-cd mini-swe-acp
+cd acp/mini-swe-acp
 uv venv .venv && source .venv/bin/activate
 uv pip install --prerelease=allow -e ".[dev]"   # benchflow pins an rc litellm
 pytest -q                                        # 12 tests, no API keys needed
@@ -23,7 +23,7 @@ ruff check src tests && ruff format --check src tests
 ### mini-swe-code (Python ≥3.10)
 
 ```bash
-cd mini-swe-code
+cd acp/mini-swe-code
 uv venv .venv && source .venv/bin/activate
 uv pip install -e ".[dev,opencode]"
 
@@ -68,7 +68,7 @@ ruff-format, typos) locally.
 ## Conventions
 
 - Keep changes scoped to one package per PR when possible.
-- `mini-swe-code/src/minisweagent/` tracks upstream mini-swe-agent — prefer
+- `acp/mini-swe-code/src/minisweagent/` tracks upstream mini-swe-agent — prefer
   upstream-compatible changes there (the opencode integration lives in
   `src/minisweagent/run/opencode/` and is ours).
 - Style follows the existing code: type annotations, `pathlib`, minimal
@@ -76,12 +76,12 @@ ruff-format, typos) locally.
 
 ## Gotchas
 
-- `mini-swe-code/.gitignore` contains `*.traj.json`, but
+- `acp/mini-swe-code/.gitignore` contains `*.traj.json`, but
   `tests/test_data/{local,github_issue}.traj.json` are tracked test fixtures
   (force-added upstream). If you ever re-add the tree wholesale, use
   `git add -f` for those two or two end-to-end tests fail with
   `FileNotFoundError`.
 - The bundled opencode TUI binary
-  (`mini-swe-code/src/minisweagent/run/opencode/bin/opencode`, ~82 MB,
+  (`acp/mini-swe-code/src/minisweagent/run/opencode/bin/opencode`, ~82 MB,
   macOS arm64) is committed as a normal blob. Rebuild recipe:
-  [docs/usage/opencode_tui.md](mini-swe-code/docs/usage/opencode_tui.md).
+  [docs/usage/opencode_tui.md](acp/mini-swe-code/docs/usage/opencode_tui.md).

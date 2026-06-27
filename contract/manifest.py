@@ -6,7 +6,7 @@ Core scans a discovery dir and parses each ``agents/<name>/manifest.toml`` into 
 per-agent CI check that the manifest is well-formed and contract-compatible:
 
   from manifest import load_manifest, ManifestError, SUPPORTED_CONTRACT_MAJOR
-  m = load_manifest("mimo-acp/manifest.toml")   # raises ManifestError if invalid
+  m = load_manifest("acp/mimo-acp/manifest.toml")   # raises ManifestError if invalid
 
 The manifest is **data only** (validated against ``manifest_schema.json``, strict /
 no unknown fields). Anything requiring code (credential files, config-file emission,
