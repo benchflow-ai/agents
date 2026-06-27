@@ -11,7 +11,7 @@ dependencies = [
 
 [project.urls]
 Repository = "https://github.com/benchflow-ai/agents"
-Documentation = "https://github.com/benchflow-ai/agents/tree/main/mimo-acp#readme"
+Documentation = "https://github.com/benchflow-ai/agents/tree/main/acp/mimo-acp#readme"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.15"]
