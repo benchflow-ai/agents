@@ -1,0 +1,8 @@
+# typos (crate-ci/typos, run via pre-commit.ci) false positives introduced by
+# the acp-registry catalog. These are proper nouns / intentional spellings, not
+# misspellings — mapping a word to itself tells typos to accept it as correct.
+[default.extend-words]
+# siGit Code — an ACP-registry agent name (github.com/getsigit/sigit).
+sigit = "sigit"
+# British spelling, kept verbatim in the catalog prose.
+uncatalogued = "uncatalogued"

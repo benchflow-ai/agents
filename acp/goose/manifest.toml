@@ -1,0 +1,14 @@
+contract_version = "1.0"
+name = "goose"
+description = "Block goose, a general OpenAI-compatible agent, over ACP (per-arch Linux binary, v1.37.0). Routes any OpenAI-compatible host via GOOSE_PROVIDER=openai with goose's host/base-path split (OPENAI_HOST=<provider base URL>, OPENAI_BASE_PATH=v1/chat/completions) plus OPENAI_API_KEY and the model in GOOSE_MODEL; supports_acp_set_model is false (model is env-owned). Verified: hello-world (reward 1.0) on DeepSeek/Daytona. CAVEAT: the host/base-path split is correct for a host-only base URL (DeepSeek, the LiteLLM gateway); a provider whose base URL already carries a path needs goose's custom_providers JSON instead."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 &&   command -v bzip2 >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 ||   (apt-get update -qq && apt-get install -y -qq    curl ca-certificates tar bzip2 xz-utils unzip) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://github.com/block/goose/releases/download/v1.37.0/goose-x86_64-unknown-linux-gnu.tar.bz2";; aarch64|arm64) U="https://github.com/block/goose/releases/download/v1.37.0/goose-aarch64-unknown-linux-gnu.tar.bz2";; *) echo "no binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/goose; curl -fsSL "$U" -o "/tmp/bf-acp-archive"; tar -xjf "/tmp/bf-acp-archive" -C /opt/benchflow/acp/goose; chmod +x /opt/benchflow/acp/goose/goose 2>/dev/null || true; [ -x /opt/benchflow/acp/goose/goose ]'''
+launch_cmd = '''cd /opt/benchflow/acp/goose && GOOSE_PROVIDER=openai OPENAI_HOST=$BENCHFLOW_PROVIDER_BASE_URL OPENAI_BASE_PATH=v1/chat/completions ./goose acp'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["goose"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_API_KEY = "OPENAI_API_KEY"
+BENCHFLOW_PROVIDER_MODEL = "GOOSE_MODEL"
