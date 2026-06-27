@@ -14,7 +14,7 @@ dependencies = [
 
 [project.urls]
 Repository = "https://github.com/benchflow-ai/agents"
-Documentation = "https://github.com/benchflow-ai/agents/tree/main/mini-swe-acp#readme"
+Documentation = "https://github.com/benchflow-ai/agents/tree/main/acp/mini-swe-acp#readme"
 
 [project.optional-dependencies]
 dev = [

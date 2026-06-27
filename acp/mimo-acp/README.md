@@ -22,7 +22,7 @@ benchflow eval  ──ACP/stdio──▶  mimo acp   (native server, npm @mimo-a
 ## Install
 
 ```bash
-pip install "mimo-acp @ git+https://github.com/benchflow-ai/agents#subdirectory=mimo-acp"
+pip install "mimo-acp @ git+https://github.com/benchflow-ai/agents#subdirectory=acp/mimo-acp"
 ```
 
 ```python

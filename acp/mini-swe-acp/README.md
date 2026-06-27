@@ -19,7 +19,7 @@ benchflow ACP client ←stdio→ acp_shim.py ←in-process→ minisweagent Defau
 ## Install
 
 ```bash
-pip install "mini-swe-acp @ git+https://github.com/benchflow-ai/agents#subdirectory=mini-swe-acp"
+pip install "mini-swe-acp @ git+https://github.com/benchflow-ai/agents#subdirectory=acp/mini-swe-acp"
 ```
 
 ## Usage
