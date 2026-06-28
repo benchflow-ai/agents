@@ -39,6 +39,9 @@ jobs:
         run: uv pip install --python ${Python_ROOT_DIR} --prerelease=allow -e '.[dev]'
       - name: node --check server.mjs
         run: node --check src/*/server.mjs
+      - name: Install shared ai-sdk node deps (offline wire-parity re-drive)
+        working-directory: ai-sdk
+        run: npm ci
       - name: Run pytest
         run: pytest -q
       - name: Ruff

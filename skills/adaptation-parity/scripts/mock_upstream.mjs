@@ -11,6 +11,10 @@ import { appendFileSync } from "node:fs";
 const PORT = Number(process.env.PORT || 11500);
 const REQ_LOG = process.env.REQ_LOG || "/tmp/parity-upstream.jsonl";
 const TAG = process.env.MOCK_TAG || "mock";
+// The agent's OWN task cwd for this capture (standalone temp-dir, or /app inside
+// BenchFlow). Recorded on every logged line so the parity normalizer collapses
+// each side's cwd to <CWD> symmetrically. Empty when unset (older captures).
+const MOCK_CWD = process.env.MOCK_CWD || "";
 const RESP_ID = "chatcmpl-parity-0001";
 const TOOL_ID = "call_parity_writeFile_0001";
 const frame = (o) => `data: ${JSON.stringify(o)}\n\n`;
@@ -39,7 +43,9 @@ http.createServer((req, res) => {
   let raw = ""; req.on("data", (c) => (raw += c));
   req.on("end", () => {
     let body = {}; try { body = JSON.parse(raw); } catch {}
-    appendFileSync(REQ_LOG, JSON.stringify({ tag: TAG, body }) + "\n");
+    const rec = { tag: TAG, body };
+    if (MOCK_CWD) rec.cwd = MOCK_CWD;
+    appendFileSync(REQ_LOG, JSON.stringify(rec) + "\n");
     const hasTool = (body.messages || []).some((m) => m && m.role === "tool");
     res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8" });
     for (const c of (hasTool ? finalChunks() : toolCallChunks())) res.write(c);

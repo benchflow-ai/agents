@@ -1,0 +1,5 @@
+{
+  "stopReason": "end_turn",
+  "toolCallNames": ["writeFile"],
+  "fileWritten": "Hello, world!"
+}
