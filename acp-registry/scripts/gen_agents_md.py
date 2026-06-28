@@ -63,10 +63,9 @@ _SECTION = {
     CATALOG: (
         "Catalog — BYO-redirectable, recipe given, not yet wired",
         "These can be pointed at an arbitrary OpenAI/Anthropic-compatible base "
-        "URL, so they're adaptable — each is held back only by something this "
-        "npx-only first pass doesn't ship (a config-file writer, a binary "
-        "installer, a uvx bootstrap, or a model-id format BenchFlow can't emit). "
-        "The **Recipe** column is the exact next step to wire it.",
+        "URL, so they're adaptable — each is held back by a config-file writer, a "
+        "binary/uvx installer, or a model-id format BenchFlow can't emit. "
+        "The **Recipe** column is the exact next step to wire it (or why it's blocked).",
     ),
     NATIVE: (
         "Native — already a BenchFlow built-in",

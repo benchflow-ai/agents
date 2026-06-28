@@ -2,13 +2,32 @@
 
 The repo's promise is that an agent **behaves the same** whether driven inside the
 BenchFlow eval harness or standalone in production. "It runs in both" is not
-enough; the behavior must match. Verify at two levels.
+enough; the behavior must match. How far that match is checkable depends on the
+agent's [adaptation tier](tiers.md): full wire-level behavior-match is the bar for
+the **native** and **wired** tiers — the model is gateway-routed, so the raw
+upstream request is captured — while **runnable** agents run the model on the
+vendor backend with no raw-LLM capture, and can only be checked at the **outcome**
+level.
+
+The two checks below map onto the tiers (see [`tiers.md`](tiers.md)): **native** +
+**wired** capture the raw-LLM trajectory (gateway proxy) **and** the ACP-trajectory
+logs, hence **wire + outcome** parity; **runnable** captures the ACP-trajectory
+logs only, hence **outcome** parity only; **catalog**, **vendor-locked**, and
+**out-of-scope** are not adapted, so neither check applies. Per-agent verification
+evidence — the **Verified** column — now lives in
+[`acp-registry/AGENTS.md`](../acp-registry/AGENTS.md). Verify at two levels.
 
 ## Wire parity (does the model receive the same request?)
 
 Drive the agent's ACP server against a deterministic, capturing mock upstream —
 once **standalone**, once **through BenchFlow's gateway** — and diff the upstream
-requests. Tooling in [`skills/adaptation-parity/scripts`](../skills/adaptation-parity/scripts):
+requests. This is a **native**/**wired**-only check: the gateway proxy is where the
+raw-LLM trajectory is captured, so there's something to byte-diff; a **runnable**
+agent runs the model on its own/vendor backend, so there's no proxy capture to
+diff. Tooling in [`skills/adaptation-parity/scripts`](../skills/adaptation-parity/scripts)
+(`acp_capture.mjs` + `parity_diff.py` below; the dir also ships `acp_smoke.mjs`, a
+runnable-tier ACP routing/handshake smoke, and `path_wire_parity.py`, a uniform
+offline ai-sdk wire-parity check):
 
 ```bash
 node acp_capture.mjs --server <server.mjs> --out /tmp/outside.jsonl   # standalone
@@ -39,7 +58,10 @@ the model conditions on — is a real divergence and a FAIL.
 
 Run the same task inside and standalone; compare reward, tool sequence, and files
 produced. Token counts differ within model sampling non-determinism — that is *not*
-a divergence.
+a divergence. For **runnable** agents this is the *only* verification available —
+there's no wire capture to fall back from — and since a vendor-backed agent runs
+the model on a nondeterministic upstream, the match is correspondingly looser
+(expect the reward and broad tool sequence to agree, not an exact trace).
 
 ## The honesty bar
 

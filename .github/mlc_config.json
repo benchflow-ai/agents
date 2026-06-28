@@ -4,6 +4,9 @@
       "pattern": "https://github.com/?.*"
     },
     {
+      "pattern": "https://(www\\.)?npmjs\\.com/.*"
+    },
+    {
       "pattern": "https://platform.openai.com/docs/.*"
     },
     {

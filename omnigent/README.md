@@ -34,8 +34,7 @@ one-shot CLI there.
   `registry.VALID_PROTOCOLS` (so `register_agent` accepts the protocol), and
   `rollout._connect_session_factory` (to resolve + connect the entrypoint). This
   seam is **not** in published `0.6.x`. Without it, `register()` logs a warning
-  and returns `None` (import stays safe) — the same way `acp-registry` degrades
-  without its `acp_model_via_env` flag.
+  and returns `None` (import stays safe).
 - **x86_64 sandbox** (e.g. Daytona). Omnigent's dependency `cel-expr-python` has
   no `linux-aarch64` wheel, so it installs on x86_64 but not arm64 (local
   Apple-Silicon docker). It also has no `cp314` wheel, so the install pins
