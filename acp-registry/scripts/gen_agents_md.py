@@ -20,6 +20,7 @@ from acp_registry.catalog import (  # noqa: E402
     CATALOG,
     NATIVE,
     OUT_OF_SCOPE,
+    RUNNABLE,
     VENDOR_LOCKED,
     WIRED,
 )
@@ -32,18 +33,25 @@ _SNAPSHOT = json.loads(
 _BADGE = {
     NATIVE: ("🟦", "native"),
     WIRED: ("✅", "wired"),
+    RUNNABLE: ("🏃", "runnable"),
     CATALOG: ("📋", "catalog"),
     VENDOR_LOCKED: ("🔒", "vendor-locked"),
     OUT_OF_SCOPE: ("➖", "out-of-scope"),
 }
 # Presentation order for the doc (most-actionable first).
-_ORDER = (WIRED, CATALOG, NATIVE, VENDOR_LOCKED, OUT_OF_SCOPE)
+_ORDER = (WIRED, RUNNABLE, CATALOG, NATIVE, VENDOR_LOCKED, OUT_OF_SCOPE)
 _SECTION = {
     WIRED: (
         "Wired — registered + routes correctly by construction",
         "`register()` installs these. Routing is verified *by construction* "
         "(confirmed env vars + a model format BenchFlow can emit); see the "
         "honesty bar in the README for what that does and doesn't claim.",
+    ),
+    RUNNABLE: (
+        "Runnable — installs + launches headless, but model not gateway-enforced",
+        "Install + launch headlessly in a benchflow task env; model runs on the "
+        "agent's own/vendor backend (not gateway-enforced). Executable, not a "
+        "faithful model-controlled eval. `register()` does not install these.",
     ),
     CATALOG: (
         "Catalog — BYO-redirectable, recipe given, not yet wired",

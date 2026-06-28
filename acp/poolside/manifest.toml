@@ -1,0 +1,18 @@
+contract_version = "1.0"
+name = "poolside"
+description = "Poolside 'pool' CLI (poolsideai/pool) over ACP - proprietary per-arch Linux binary v1.0.5 (`pool acp`). RUNNABLE (own backend), NOT wired. Bare `pool acp` answers `initialize` but rejects `session/new` with -32000 'Authentication required: Run `pool login`' and advertises authMethods:[] (no ACP-level auth method). The non-interactive bypass: `pool login --api-key <key>` configures STANDALONE mode headlessly (exit 0, no OAuth) writing credentials.json + settings.yaml; after that `session/new` returns a real UUID sessionId plus configOptions. Routes through Poolside's own hosted backend (settings.yaml api_url defaults to https://inference.poolside.ai, model poolside/laguna-m.1). Pointing api_url at a custom OpenAI-compatible endpoint BREAKS session/new, so it cannot be wired to the gateway - upstreamRequests stays 0; the handshake completes on a dummy key, the prompt step then 401s at the real backend (stopReason null), which is fine under the relaxed bar. supports_acp_set_model=false: model is a NewSessionResponse config_option 'select' (poolside/laguna-m.1), vendor-owned, not session/set_model. Verified on the ACP handshake smoke: initOk=true, real sessionId 019f0cae-5f80-7a82-a023-3f0e1b3eab7a, port 12012, deepseek-v4-flash."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates tar) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://downloads.poolside.ai/pool/v1.0.5/pool-linux-amd64.tar.gz"; B="pool-linux-amd64";; aarch64|arm64) U="https://downloads.poolside.ai/pool/v1.0.5/pool-linux-arm64.tar.gz"; B="pool-linux-arm64";; *) echo "no pool binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/poolside; curl -fsSL "$U" -o /tmp/bf-pool.tgz; tar -xzf /tmp/bf-pool.tgz -C /opt/benchflow/acp/poolside; chmod +x /opt/benchflow/acp/poolside/$B; ln -sf /opt/benchflow/acp/poolside/$B /opt/benchflow/acp/poolside/pool; chmod -R a+rX /opt/benchflow; [ -x /opt/benchflow/acp/poolside/pool ]'''
+launch_cmd = '''set -e; A=$(uname -m); case "$A" in x86_64|amd64) B=pool-linux-amd64;; aarch64|arm64) B=pool-linux-arm64;; *) B=pool;; esac; BIN=/opt/benchflow/acp/poolside/$B; export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}" XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"; mkdir -p "$XDG_CONFIG_HOME/poolside" "$XDG_STATE_HOME" "$XDG_DATA_HOME"; "$BIN" login --api-key "${POOLSIDE_API_KEY:-bench-standalone}" >/dev/null 2>&1 || true; exec "$BIN" acp --sandbox disabled'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["poolside", "pool"]
+
+# pool reads its key from credentials.json (written non-interactively by the
+# launch's `pool login --api-key`), NOT from a plain env var, so only the key is
+# mapped. base_url/model are vendor-owned (Poolside hosted backend + poolside/laguna-m.1);
+# overriding api_url to a custom endpoint breaks session/new, so they are intentionally
+# not wired.
+[env_mapping]
+BENCHFLOW_PROVIDER_API_KEY = "POOLSIDE_API_KEY"

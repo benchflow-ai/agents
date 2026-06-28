@@ -1,0 +1,30 @@
+contract_version = "1.0"
+name = "minion-code"
+description = "minion-code (femto/minion-code) - a uvx-distributed Python coding agent built on the Minion (minionx) framework, native-ACP via its `acp` subcommand. Routes any OpenAI-compatible host via a minion config.yaml the launcher writes to $MINION_ROOT/config/config.yaml (an isolated per-launch dir): it defines a `models:` entry keyed by the benchmark model with api_type openai + base_url/api_key read at runtime from OPENAI_BASE_URL/OPENAI_API_KEY via minion's ${ENV} interpolation, and the OpenAI client sends the model id BARE. Model is launch/config-owned: minion-code's set_session_model is a no-op (returns None), so supports_acp_set_model is false - the model is delivered at launch via `--model $OPENAI_MODEL` AND as the config.yaml key. CRITICAL PIN: minion-code 0.1.44 imports `acp.schema.AuthMethod`, which agent-client-protocol>=0.9 renamed/removed; the resolver's default (0.10.x) crashes the ACP server on import, so the launch/install PINS agent-client-protocol==0.8.1 (highest release that still exports AuthMethod and satisfies minion-code's >=0.7.0 floor). Headless notes handled by the launcher: (1) initialize advertises an openrouter-oauth auth method but never blocks; new_session raises AUTH_REQUIRED only when NO api key env is present, so the OPENAI_API_KEY mapped from the gateway satisfies it WITHOUT any OAuth/login; (2) `--dangerously-skip-permissions` so tool calls don't prompt; (3) MINION_ROOT is pointed at an isolated mktemp dir so the gateway config overrides any user ~/.minion/config.yaml. Verified WIRED on the routing smoke: 2 upstream POST /v1/chat/completions, bare model 'deepseek-v4-flash', initOk + sessionId, stopReason end_turn. AGPL-3.0."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates) ); mkdir -p /opt/benchflow/acp/minion-code; export UV_INSTALL_DIR=/opt/benchflow/uv; curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH=/opt/benchflow/uv:$PATH; export UV_CACHE_DIR=/opt/benchflow/acp/minion-code/uv-cache; timeout 600 /opt/benchflow/uv/uvx --from minion-code@0.1.44 --with agent-client-protocol==0.8.1 minion-code --help </dev/null >/dev/null 2>&1 || true; chmod -R a+rX /opt/benchflow; [ -x /opt/benchflow/uv/uvx ]'''
+launch_cmd = '''set -e; export PATH=/opt/benchflow/uv:/usr/local/bin:$HOME/.local/bin:$PATH; export UV_CACHE_DIR=/opt/benchflow/acp/minion-code/uv-cache; MODEL="${OPENAI_MODEL:-${BENCHFLOW_PROVIDER_MODEL:-deepseek-v4-flash}}"; export MINION_ROOT="$(mktemp -d)/minion-root"; mkdir -p "$MINION_ROOT/config"; cat > "$MINION_ROOT/config/config.yaml" <<YAML
+models:
+  ${MODEL}:
+    api_type: openai
+    base_url: \${OPENAI_BASE_URL}
+    api_key: \${OPENAI_API_KEY}
+    model: ${MODEL}
+    temperature: 0.0
+  default:
+    api_type: openai
+    base_url: \${OPENAI_BASE_URL}
+    api_key: \${OPENAI_API_KEY}
+    model: ${MODEL}
+    temperature: 0.0
+YAML
+exec uvx --from minion-code@0.1.44 --with agent-client-protocol==0.8.1 minion-code acp --model "$MODEL" --dangerously-skip-permissions'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["minion-code", "minion"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_BASE_URL = "OPENAI_BASE_URL"
+BENCHFLOW_PROVIDER_API_KEY = "OPENAI_API_KEY"
+BENCHFLOW_PROVIDER_MODEL = "OPENAI_MODEL"

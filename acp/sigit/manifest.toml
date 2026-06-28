@@ -1,0 +1,15 @@
+contract_version = "1.0"
+name = "sigit"
+description = "siGit Code (getsigit/sigit) - a LOCAL-INFERENCE coding agent over native ACP (per-arch Linux ELF binary, v1.1.0). Fully self-contained: on the first prompt it downloads a ~2GB GGUF model (default Qwen 2.5 3B Instruct Q4_K_M from bartowski/Qwen2.5-3B-Instruct-GGUF) into the HF hub cache and runs it ON-DEVICE via the embedded Onde / mistralrs engine (CPU). No API key, no cloud, no remote-provider concept - it does NOT route through the BenchFlow gateway (upstreamRequests=0 on the routing smoke), so [env_mapping] is intentionally empty and supports_acp_set_model is false (the model is engine-owned). ACP-over-stdio is auto-selected whenever stdin is not a TTY; launch is the bare binary with no subcommand/args (Zed / VS-Code ACP configs use command=sigit, args=[]). Verified RUNNABLE on the handshake smoke (port 12004): initialize OK + session/new returned a sessionId, then it downloaded+loaded the GGUF (42.4s) and began local tool-inference on the prompt (prompt timed out under the 70s smoke cap - expected for cold CPU inference; no real-task reward claimed)."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://github.com/getsigit/sigit/releases/download/v1.1.0/sigit-linux-amd64";; aarch64|arm64) U="https://github.com/getsigit/sigit/releases/download/v1.1.0/sigit-linux-arm64";; *) echo "no sigit binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/sigit; curl -fsSL "$U" -o /opt/benchflow/acp/sigit/sigit; chmod +x /opt/benchflow/acp/sigit/sigit; chmod -R a+rX /opt/benchflow; [ -x /opt/benchflow/acp/sigit/sigit ]'''
+launch_cmd = '''exec /opt/benchflow/acp/sigit/sigit'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["sigit", "sigit-code"]
+
+# sigit runs a LOCAL GGUF model via the embedded Onde / mistralrs engine.
+# It honors NO OpenAI/Anthropic base_url/key/model env, so there is nothing
+# to route through the gateway - [env_mapping] is left empty on purpose.
+[env_mapping]

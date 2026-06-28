@@ -1,0 +1,15 @@
+contract_version = "1.0"
+name = "stakpak"
+description = "Stakpak (stakpak/agent) - an open-source Rust DevOps agent over ACP, per-arch Linux binary v0.3.88 (`stakpak acp`). UNBLOCK of the catalog HARD-BLOCK: the ACP path resolves model->provider by substring (knows anthropic/openai/google, else falls through to the hosted `stakpak` provider). We route any OpenAI-compatible host by (a) generating a valid config via `stakpak auth login --provider openai --api-key K --endpoint BASE` (writes ~/.stakpak/config.toml providers.openai.{api_endpoint,auth.key}), then (b) forcing the default-profile model to `openai/<model>` so the substring resolver picks the openai provider + our endpoint. Model is config/env-owned (delivered at launch via the config file), so supports_acp_set_model is false - the ACP session/set_model path uses the same broken resolver and validates against the static models.dev catalog, so we do NOT use it. Launcher isolates state under HOME=$STAKPAK_BF_HOME (default ~/.stakpak-bf) and re-writes config from env each launch. Verified WIRED on the routing smoke: 2 upstream /v1/chat/completions, wire model `openai/deepseek-v4-flash`, initOk true, sessionId non-null, stopReason end_turn (no real-task reward claimed)."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates tar) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://github.com/stakpak/agent/releases/download/v0.3.88/stakpak-linux-x86_64.tar.gz";; aarch64|arm64) U="https://github.com/stakpak/agent/releases/download/v0.3.88/stakpak-linux-aarch64.tar.gz";; *) echo "no stakpak binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/stakpak; curl -fsSL "$U" -o /tmp/bf-stakpak.tgz; tar -xzf /tmp/bf-stakpak.tgz -C /opt/benchflow/acp/stakpak; chmod +x /opt/benchflow/acp/stakpak/stakpak; chmod -R a+rX /opt/benchflow; [ -x /opt/benchflow/acp/stakpak/stakpak ]'''
+launch_cmd = '''set -e; BFHOME="${STAKPAK_BF_HOME:-$HOME/.stakpak-bf}"; mkdir -p "$BFHOME/.stakpak"; export HOME="$BFHOME"; BIN=/opt/benchflow/acp/stakpak/stakpak; MODEL="openai/${OPENAI_MODEL#openai/}"; rm -f "$BFHOME/.stakpak/config.toml"; "$BIN" auth login --provider openai --api-key "$OPENAI_API_KEY" --endpoint "$OPENAI_BASE_URL" >/dev/null 2>&1 || true; sed -i "s|^model = .*|model = \"${MODEL}\"|" "$BFHOME/.stakpak/config.toml"; exec "$BIN" acp'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "provider/model"
+supports_acp_set_model = false
+aliases = ["stakpak"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_BASE_URL = "OPENAI_BASE_URL"
+BENCHFLOW_PROVIDER_API_KEY = "OPENAI_API_KEY"
+BENCHFLOW_PROVIDER_MODEL = "OPENAI_MODEL"

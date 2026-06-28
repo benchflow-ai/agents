@@ -1,0 +1,15 @@
+contract_version = "1.0"
+name = "grok-build"
+description = "xAI Grok Build CLI (proprietary, v0.2.20) over ACP via a per-arch Linux static-pie binary (`grok agent stdio`). Surprisingly BYO: GROK_MODELS_BASE_URL routes ALL chat traffic through an arbitrary OpenAI-completions gateway (no xAI OAuth needed at launch when GROK_OAUTH_ENABLED=0 + XAI_API_KEY env fallback are set). The launcher points GROK_MODELS_BASE_URL at the gateway, supplies XAI_API_KEY, disables autoupdate/telemetry/oauth, and isolates GROK_HOME under $HOME. CAVEAT: the wire model id is a FIXED literal 'grok-build' (the agent's built-in coding model) regardless of GROK_DEFAULT_MODEL or ACP session/set_model, so supports_acp_set_model is false and the benchmark model must be served/aliased as 'grok-build' on the gateway (e.g. a LiteLLM alias). Verified wired-by-construction on the routing smoke: initialize -> session/new -> session/prompt, 3 upstream /v1/chat/completions (model 'grok-build'), stopReason end_turn (no real-task reward claimed). Access-gated for xAI's own backend (SuperGrok/Premium+), but headless launch + handshake + gateway routing need no account."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://x.ai/cli/grok-0.2.20-linux-x86_64";; aarch64|arm64) U="https://x.ai/cli/grok-0.2.20-linux-aarch64";; *) echo "no grok binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/grok-build; curl -fsSL "$U" -o /opt/benchflow/acp/grok-build/grok; chmod +x /opt/benchflow/acp/grok-build/grok; chmod -R a+rX /opt/benchflow; [ -x /opt/benchflow/acp/grok-build/grok ]'''
+launch_cmd = '''set -e; export GROK_HOME="$HOME/.grok-bf"; mkdir -p "$GROK_HOME"; export GROK_DISABLE_AUTOUPDATER=1; export GROK_TELEMETRY_ENABLED=0; export GROK_OAUTH_ENABLED=0; export GROK_MODELS_BASE_URL="${GROK_MODELS_BASE_URL:-$OPENAI_BASE_URL}"; export XAI_API_KEY="${XAI_API_KEY:-${OPENAI_API_KEY:-mock-key}}"; export GROK_DEFAULT_MODEL="${GROK_DEFAULT_MODEL:-${OPENAI_MODEL:-grok-build}}"; cd /opt/benchflow/acp/grok-build; exec ./grok agent stdio'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["grok", "grok-build"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_BASE_URL = "GROK_MODELS_BASE_URL"
+BENCHFLOW_PROVIDER_API_KEY = "XAI_API_KEY"
+BENCHFLOW_PROVIDER_MODEL = "GROK_DEFAULT_MODEL"
