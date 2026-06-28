@@ -1,0 +1,15 @@
+contract_version = "1.0"
+name = "mistral-vibe"
+description = "Mistral Vibe over ACP via the dedicated `vibe-acp` Linux binary (PyInstaller onedir, v2.18.0). vibe-acp launches the ACP server directly (no subcommand/flag). It is BYO-provider: it has no env-var routing knobs, so the launch_cmd writes ~/.vibe/config.toml with a generic OpenAI-compatible custom provider — [[providers]] name=benchflow, api_base=<gateway base url>, api_key_env_var=OPENAI_API_KEY, api_style=openai (Backend.GENERIC posts {api_base}/chat/completions) — plus a matching [[models]] entry and active_model set to the benchmark model. The model is owned by the config file (active_model), so supports_acp_set_model is false and the model is NOT delivered over ACP. acp_model_format is bare (ProviderConfig.api_style=openai sends ModelConfig.name verbatim as the OpenAI `model`). Verified wired-by-construction: hello-world ACP turn routed 2 upstream /chat/completions requests through the mock gateway (model=deepseek-v4-flash, stopReason=end_turn)."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 || ( apt-get update -qq && apt-get install -y -qq curl ca-certificates unzip ) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://github.com/mistralai/mistral-vibe/releases/download/v2.18.0/vibe-acp-linux-x86_64-2.18.0.zip";; aarch64|arm64) U="https://github.com/mistralai/mistral-vibe/releases/download/v2.18.0/vibe-acp-linux-aarch64-2.18.0.zip";; *) echo "no vibe-acp binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/mistral-vibe; curl -fsSL "$U" -o "/tmp/bf-vibe-acp.zip"; unzip -o -q "/tmp/bf-vibe-acp.zip" -d /opt/benchflow/acp/mistral-vibe; rm -f /tmp/bf-vibe-acp.zip; chmod +x /opt/benchflow/acp/mistral-vibe/vibe-acp 2>/dev/null || true; chmod -R a+rX /opt/benchflow/acp/mistral-vibe; [ -x /opt/benchflow/acp/mistral-vibe/vibe-acp ]'''
+launch_cmd = '''mkdir -p "$HOME/.vibe"; B="${OPENAI_BASE_URL:-$BENCHFLOW_PROVIDER_BASE_URL}"; M="${OPENAI_MODEL:-$BENCHFLOW_PROVIDER_MODEL}"; : "${M:=deepseek-v4-flash}"; printf 'active_model = "%s"\nenable_telemetry = false\nenable_update_checks = false\n\n[[providers]]\nname = "benchflow"\napi_base = "%s"\napi_key_env_var = "OPENAI_API_KEY"\napi_style = "openai"\n\n[[models]]\nname = "%s"\nprovider = "benchflow"\nalias = "%s"\n' "$M" "$B" "$M" "$M" > "$HOME/.vibe/config.toml"; exec /opt/benchflow/acp/mistral-vibe/vibe-acp'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["mistral-vibe", "vibe"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_BASE_URL = "OPENAI_BASE_URL"
+BENCHFLOW_PROVIDER_API_KEY = "OPENAI_API_KEY"
+BENCHFLOW_PROVIDER_MODEL = "OPENAI_MODEL"

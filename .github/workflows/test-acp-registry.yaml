@@ -1,0 +1,40 @@
+name: acp-registry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'acp-registry/**'
+      - '.github/workflows/test-acp-registry.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'acp-registry/**'
+      - '.github/workflows/test-acp-registry.yaml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+        working-directory: acp-registry
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      # --prerelease=allow: benchflow pins an rc litellm
+      - name: Install dependencies
+        run: uv pip install --python ${Python_ROOT_DIR} --prerelease=allow -e '.[dev]'
+      - name: AGENTS.md is up to date with the catalog
+        run: |
+          python scripts/gen_agents_md.py > /tmp/AGENTS.expected.md
+          diff -u AGENTS.md /tmp/AGENTS.expected.md
+      - name: Run pytest
+        run: pytest -q
+      - name: Ruff
+        run: uvx ruff check src tests scripts
