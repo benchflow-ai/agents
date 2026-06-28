@@ -18,10 +18,11 @@ own/vendor backend). See [tiers.md](tiers.md).
 The single interface an agent must satisfy to be hosted. **Two halves:** (1) the **drive
 contract** — a **process that speaks ACP JSON-RPC over stdio**, satisfied by *every* hosted
 agent; and (2) the **capture contract** — routing all model calls through the injected proxy,
-satisfied **only** by the gateway-routed **wired** + **native** tiers. runnable / catalog /
-vendor-locked agents meet the drive contract but not the capture contract, so they're tracked
-at the ACP-trajectory level only (see [tiers.md](tiers.md)). Declared by a **manifest** + the
-agent's own shim/skills directory. There is no second protocol.
+satisfied **only** by the gateway-routed **wired** + **native** tiers. **runnable** agents
+meet the drive contract but not the capture contract, so they're tracked at the ACP-trajectory
+level only; catalog / vendor-locked / out-of-scope are **not adapted** (not hosted — neither
+trajectory captured; see [tiers.md](tiers.md)). Declared by a **manifest** + the agent's own
+shim/skills directory. There is no second protocol.
 
 ### Host kind
 How benchflow runs an agent. **Exactly one** — an ACP-over-stdio process. Non-ACP platforms
@@ -52,9 +53,9 @@ The single point where benchflow observes a **gateway-routed** agent's model tra
 usage are reconstructed here. **Fail-closed:** core strips all upstream provider secrets (the
 agent can reach *only* the proxy) and `usage_tracking=required` (a capture miss fails the run,
 never a silent untracked result). This boundary exists only for the **wired** + **native**
-tiers; **runnable** / catalog / vendor-locked agents run their model on the agent's own/vendor
-backend, never traverse the proxy, and are observed at the ACP-trajectory level only (see
-[tiers.md](tiers.md)).
+tiers; **runnable** agents run their model on the agent's own/vendor backend, never traverse
+the proxy, and are observed at the ACP-trajectory level only; catalog / vendor-locked /
+out-of-scope are **not adapted** (not hosted, not observed — see [tiers.md](tiers.md)).
 
 ### env_mapping
 The declarative rename table in a manifest (`BENCHFLOW_PROVIDER_BASE_URL → OPENAI_BASE_URL`,

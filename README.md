@@ -65,7 +65,7 @@ it. Full reference in [docs/tiers.md](docs/tiers.md); live per-agent table in
 |---|---|
 | ✅ **wired** + 🟦 **native** | raw-LLM trajectory (gateway proxy) **and** ACP-trajectory logs — model-enforced, wire-parity-verifiable |
 | 🏃 **runnable** | ACP-trajectory logs **only** — the model runs on the agent's own/vendor backend, not gateway-enforced (executable, not a faithful model-enforced eval) |
-| 📋 **catalog** / 🔒 **vendor-locked** / ➖ **out-of-scope** | not adapted — a wiring to-do (recipe given), a backend-locked CLI, or a non-single-model agent |
+| 📋 **catalog** / 🔒 **vendor-locked** / ➖ **out-of-scope** | not adapted — a wiring to-do (recipe or block recorded), a backend-locked CLI, or a non-single-model agent |
 
 Snapshot `v1.0.0`: **wired 13 · runnable 14 · catalog 1 · native 6 · vendor-locked 1
 · out-of-scope 1** (36 total) — [AGENTS.md](acp-registry/AGENTS.md) is authoritative.
