@@ -9,6 +9,7 @@
 
 [The eval ↔ prod gap](#the-eval--prod-gap) ·
 [Agents](#agents) ·
+[Tiers](#tiers-how-faithfully-can-we-host-it) ·
 [Parity](#parity-the-same-agent-in-both) ·
 [Adapt a new agent](#adapt--verify-a-new-agent) ·
 [Contributing](#contributing)
@@ -40,13 +41,34 @@ you want to both ship and benchmark.
 | Family | Agents | Eval on BenchFlow |
 |---|---|---|
 | [**mini-swe**](acp/mini-swe-code/) | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) behind opencode's TUI ([mini-swe-code](acp/mini-swe-code/)) + an ACP shim ([mini-swe-acp](acp/mini-swe-acp/)) | ✅ stable — faithful SWE-agent harness (>74% SWE-bench verified) |
-| [**ai-sdk**](ai-sdk/) | the Vercel AI SDK agent surface — `ToolLoopAgent` ([acp](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/)} | mixed — `acp` ✅ (parity byte-verified), `harness-pi` ✅ (file tasks), `codex`/`claude-code` 🧪 (need a Vercel sandbox). Per-agent maturity in [ai-sdk/README](ai-sdk/README.md). |
+| [**ai-sdk**](ai-sdk/) | the Vercel AI SDK agent surface — `ToolLoopAgent` ([acp](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/), [mimo](ai-sdk/harness-mimo/)} | mixed — `acp` ✅ (parity byte-verified), `harness-pi` ✅ (file tasks), `codex`/`claude-code` 🧪 (need a Vercel sandbox). Per-agent maturity in [ai-sdk/README](ai-sdk/README.md). |
 | [**omnigent**](omnigent/) | [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents) `pi` meta-harness — the first **non-ACP** agent here: rides BenchFlow's Session path via a `session_factory`, shelling `omnigent run` inside the sandbox | ✅ reward 1.0 on hello-world **and** the real `citation-check` research task (DeepSeek/Daytona x86_64). Needs a BenchFlow with the session-factory seam — see [omnigent/README](omnigent/README.md). |
 | [**mimo**](acp/mimo-acp/) | [MiMo Code](https://mimo.xiaomi.com/mimocode) (Xiaomi, an OpenCode fork) — its `mimo` CLI ships a **native** `mimo acp` server, registered out-of-core ([mimo-acp](acp/mimo-acp/)); no `server.mjs` (mimo *is* the ACP server), structurally like `mini-swe-acp` | ✅ the free `mimo/mimo-auto` channel runs headless. The flagship `xiaomi/mimo-v2.5-pro` (reward 1.0 on `citation-check`) is the native `mimo` agent in benchflow core — `bare` strips the `xiaomi/` prefix here. |
+| [**acp-registry**](acp-registry/) | the [Agent Client Protocol registry](https://agentclientprotocol.com/get-started/registry) — **36 agents** (goose, Qwen Code, Stakpak, GitHub Copilot, GLM, …) classified onto BenchFlow; the **33 that adapt** ship a declarative [`acp/<id>/manifest.toml`](acp/) (no adapter code; they already speak ACP) | classified into [six tiers](#tiers-how-faithfully-can-we-host-it): **13 wired** + **6 native** run as faithful model-enforced evals; **14 runnable** install + launch with ACP-trajectory logging. Full per-agent table: [acp-registry/AGENTS.md](acp-registry/AGENTS.md). |
 
-Each agent is a self-contained package: a production runtime + a thin adapter
-(ACP, or BenchFlow's non-ACP Session path for `omnigent`) registered via the
-public `register_agent` extension point.
+Agents come in two shapes: a few **self-contained packages** (the `mini-swe-*`
+runtimes, the `ai-sdk/*` group, `omnigent`) — a production runtime + a thin adapter
+registered via the public `register_agent` extension point — and **declarative
+[`acp/<id>/manifest.toml`](acp/) agents** for the ACP-registry CLIs that already
+speak ACP (no adapter code; discovered via the manifest loader, classified by tier
+in [acp-registry](acp-registry/)).
+
+## Tiers: how faithfully can we host it?
+
+Not every agent can be benchmarked the same way. We classify each by *how much of a
+run BenchFlow captures* — the bar for adaptation is the floor (**BenchFlow can create
+the experiment and track the run's logs**); the tier says how much is captured above
+it. Full reference in [docs/tiers.md](docs/tiers.md); live per-agent table in
+[acp-registry/AGENTS.md](acp-registry/AGENTS.md).
+
+| Tier | What BenchFlow tracks |
+|---|---|
+| ✅ **wired** + 🟦 **native** | raw-LLM trajectory (gateway proxy) **and** ACP-trajectory logs — model-enforced, wire-parity-verifiable |
+| 🏃 **runnable** | ACP-trajectory logs **only** — the model runs on the agent's own/vendor backend, not gateway-enforced (executable, not a faithful model-enforced eval) |
+| 📋 **catalog** / 🔒 **vendor-locked** / ➖ **out-of-scope** | not adapted — a wiring to-do (recipe or block recorded), a backend-locked CLI, or a non-single-model agent |
+
+Snapshot `v1.0.0`: **wired 13 · runnable 14 · catalog 1 · native 6 · vendor-locked 1
+· out-of-scope 1** (36 total) — [AGENTS.md](acp-registry/AGENTS.md) is authoritative.
 
 ## Parity: the same agent in both
 
@@ -59,6 +81,11 @@ environment and captures the trajectory — it does not perturb the agent. The
 [**adaptation-parity skill**](skills/adaptation-parity) automates this check;
 methodology in [docs/parity.md](docs/parity.md).
 
+Wire parity is the bar for the **wired** and **native** [tiers](#tiers-how-faithfully-can-we-host-it)
+(the model is proxied through BenchFlow's gateway, so there's a request to byte-diff);
+**runnable** agents run the model on their own backend, so they're held to outcome
+parity only.
+
 > **Honesty matters more than a green checkmark.** Toy tasks (a single file write)
 > pass easily and prove little; real eval workloads — input files, real toolchains
 > (`pytest`, network), skills — expose the gaps. No agent here is "verified" beyond
@@ -68,11 +95,19 @@ methodology in [docs/parity.md](docs/parity.md).
 
 ## Adapt & verify a new agent
 
-1. **Adapt** — write an ACP server + `register.py` ([docs/adaptation.md](docs/adaptation.md)).
-   Scaffold from `ai-sdk/acp`:
+The bar is **BenchFlow can create the experiment and track the run's logs**; how much
+it captures sets the [tier](#tiers-how-faithfully-can-we-host-it). Two routes:
+
+1. **Already speaks ACP** (most registry CLIs) — add a declarative
+   [`acp/<id>/manifest.toml`](acp/) and classify it in
+   [`acp-registry`](acp-registry/src/acp_registry/catalog.py); no adapter code. The
+   `contract/` tests validate the manifest. ([docs/adaptation.md](docs/adaptation.md))
+2. **Needs an adapter** (a TUI, an SDK agent, a non-ACP harness) — write an ACP
+   server + `register.py`. Scaffold from `ai-sdk/acp`:
    `python skills/adaptation-parity/scripts/scaffold_ai_sdk_agent.py <name>`.
-2. **Verify parity** — inside vs. standalone, with the skill's `acp_capture.mjs` +
-   `parity_diff.py` ([docs/parity.md](docs/parity.md)).
+
+Then **verify parity** — inside vs. standalone, with the skill's `acp_capture.mjs` +
+`parity_diff.py` (wired/native; [docs/parity.md](docs/parity.md)).
 
 ## Quickstarts
 
@@ -106,23 +141,30 @@ await SDK().run(task_path="...", agent="mini-swe", model="openai/gpt-4o-mini")
 Per-agent setup, design notes, and caveats live in each package's README:
 [mini-swe-code](acp/mini-swe-code/README.md) ·
 [mini-swe-acp](acp/mini-swe-acp/README.md) ·
-[ai-sdk/*](ai-sdk/README.md).
+[ai-sdk/*](ai-sdk/README.md). For the ACP-registry agents, the generated
+[acp-registry/AGENTS.md](acp-registry/AGENTS.md) lists every agent's tier, wiring
+recipe, and known issues.
 
 ## Repository layout
 
 ```text
-acp/              ACP agents, each a self-contained package — e.g.:
-  mini-swe-code/    mini-swe-agent distribution + opencode TUI (CLIs: mini, mini-opencode)
-  mini-swe-acp/     mini-swe-agent as a BenchFlow ACP agent
-ai-sdk/           Vercel AI SDK agents: acp, harness-pi, harness-codex, harness-claude-code
+acp/              all ACP agents — 2 self-contained packages + 38 declarative manifests:
+  mini-swe-code/      mini-swe-agent distribution + opencode TUI (CLIs: mini, mini-opencode)
+  mini-swe-acp/       mini-swe-agent as a BenchFlow ACP agent
+  <id>/manifest.toml  declarative registry agents (goose, qwen-code, …) + shims (mimo, …), no server code
+acp-registry/     classifies the 36 ACP-registry agents into 6 tiers (catalog.py → AGENTS.md)
+ai-sdk/           Vercel AI SDK agents: acp, harness-pi, harness-codex, harness-claude-code, harness-mimo
 omnigent/         Databricks Omnigent pi meta-harness as a non-ACP (session-factory) BenchFlow agent
+contract/         versioned manifest schema + loader + contract tests (validates acp/<id>/manifest.toml)
 skills/           adaptation-parity skill — adapt an agent + verify eval/prod parity
-docs/             adaptation.md, parity.md
+docs/             adaptation.md, parity.md, tiers.md, CONTEXT.md, adr/ (0001–0003)
 .github/          CI: per-family tests (path-filtered), ruff lint, markdown link check
 ```
 
-Each package builds, tests, and ships independently; add a new agent as a new
-package + a per-package CI workflow (or extend the `ai-sdk` matrix).
+Add an agent either way: a declarative `acp/<id>/manifest.toml` + a
+[`catalog.py`](acp-registry/src/acp_registry/catalog.py) tier entry (validated by the
+`contract/` tests), or a self-contained package + a per-package CI workflow (or extend
+the `ai-sdk` matrix). Each package still builds, tests, and ships independently.
 
 ## Contributing
 
@@ -139,8 +181,9 @@ Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). High-value no
 
 | Path | License |
 |---|---|
-| repository root, `acp/mini-swe-acp/`, `ai-sdk/`, `omnigent/`, `skills/` | [Apache-2.0](LICENSE) |
+| repository root, `acp/mini-swe-acp/`, `acp-registry/`, `ai-sdk/`, `omnigent/`, `contract/`, `skills/` | [Apache-2.0](LICENSE) |
 | `acp/mini-swe-code/` | [MIT](acp/mini-swe-code/LICENSE.md) (upstream mini-swe-agent license, kept verbatim) |
+| `acp/<id>/` manifest agents | each keeps its upstream license — recorded per entry in [acp-registry/AGENTS.md](acp-registry/AGENTS.md) |
 
 ## Acknowledgments
 
@@ -150,3 +193,4 @@ Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). High-value no
 - [Vercel AI SDK](https://ai-sdk.dev) — the toolkit behind the `ai-sdk` agents.
 - [opencode](https://opencode.ai) — the TUI that makes the agent a pleasure to drive.
 - [Agent Client Protocol](https://agentclientprotocol.com) — the editor/agent-agnostic protocol the eval shims speak.
+- [ACP registry](https://agentclientprotocol.com/get-started/registry) — the source of the 36 ACP agents the [`acp-registry`](acp-registry/) package maps onto BenchFlow.

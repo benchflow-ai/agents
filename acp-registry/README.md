@@ -6,7 +6,8 @@ The ACP registry is a fast-growing list of agents — Qwen Code, goose, Cline,
 GitHub Copilot, Stakpak, and ~30 more — that all speak ACP over stdio. Because
 BenchFlow drives agents over ACP, that registry is a natural source of agents to
 benchmark. This package answers the practical question for **every** agent in it:
-*can it run as a faithful, model-enforced BenchFlow eval — and if so, how?*
+*can it run as a faithful, model-enforced BenchFlow eval — and if not, can BenchFlow
+still launch it and capture its ACP trajectory (runnable)?*
 
 It is the same eval↔prod-gap story as the rest of this repo ([root README](../README.md)):
 these agents ship in production (in Zed, JetBrains, a terminal); here the **same
@@ -16,26 +17,33 @@ what users run.
 ## What "adapting" an ACP agent means
 
 Every registry agent is already an ACP server, so there's no server to write
-(unlike [`ai-sdk/`](../ai-sdk)). Adapting one is a thin registration: install it,
-launch it in ACP mode, and route its model calls through BenchFlow's gateway via
-`env_mapping` so the **benchmark's** model is enforced and usage is captured.
+(unlike [`ai-sdk/`](../ai-sdk)). Adapting a **wired** one is a thin registration:
+install it, launch it in ACP mode, and route its model calls through BenchFlow's
+gateway via `env_mapping` so the **benchmark's** model is enforced and usage is
+captured. An agent that can't be pointed at the gateway can still be **runnable** —
+BenchFlow installs + launches it and captures its ACP-trajectory logs, the model left
+on the agent's own/vendor backend; runnable agents are discovered via the
+`acp/<id>/manifest.toml` loader (not installed by `register()`) and validated by the
+top-level [`contract/`](../contract) package.
 
-Whether that routing is *possible* is the whole question — and it cleanly splits
-the registry. The full classification of all 36 agents is in **[AGENTS.md](AGENTS.md)**
-(generated from [`catalog.py`](src/acp_registry/catalog.py), the single source of
-truth). The tiers:
+Whether the gateway can be made authoritative is the dividing line — and it cleanly
+splits the registry. The full classification of all 36 agents is in
+**[AGENTS.md](AGENTS.md)** (generated from [`catalog.py`](src/acp_registry/catalog.py),
+the single source of truth); the canonical tier model + what BenchFlow captures per
+tier lives in [`../docs/tiers.md`](../docs/tiers.md). The tiers:
 
 | Tier | Meaning |
 |---|---|
 | 🟦 **native** | BenchFlow already ships a built-in (`claude-agent-acp`, `codex-acp`, `gemini`, `opencode`, `pi-acp`, `deepagents`). Use it; we don't shadow it. |
-| ✅ **wired** | Registered here, routes correctly **by construction** (confirmed env vars + a model format BenchFlow can emit). |
-| 📋 **catalog** | BYO-provider — *adaptable*, but held back by something this npx-only first pass doesn't ship (a config-file writer, a binary installer, a uvx bootstrap, or a model-id format BenchFlow can't emit). Each carries the **exact recipe**. |
-| 🔒 **vendor-locked** | Authenticates only to its vendor's backend — no arbitrary base URL. Can't enforce the benchmark's model, so it can't be a faithful eval. |
-| ➖ **out-of-scope** | Not a single LLM coding/eval agent (e.g. an agent marketplace). |
+| ✅ **wired** | Registered here, routes the model through BenchFlow's gateway **by construction** (confirmed env vars + a model format BenchFlow can emit) — raw-LLM proxy + ACP logs both captured. |
+| 🏃 **runnable** | Installs + launches headless in a BenchFlow task env, ACP handshake verified; BenchFlow tracks the **ACP-trajectory logs only** — the model runs on the agent's own/vendor backend, so the raw-LLM proxy is not captured. Executable, **not** a faithful model-enforced eval. |
+| 📋 **catalog** | BYO-redirectable in principle but not yet wired; each records the **next step** to wire it, or why it's blocked. Currently one agent (`kimi`, hard-blocked on mandatory OAuth). |
+| 🔒 **vendor-locked** | Authenticates only to its vendor's backend — no arbitrary base URL. Can't enforce the benchmark's model, so it can't be a faithful eval. Currently one agent (`cursor`). |
+| ➖ **out-of-scope** | Not a single LLM coding/eval agent (e.g. an agent marketplace — `agoragentic-acp`). |
 
-The split is the contribution: most ACP agents are coding-vendor CLIs locked to
-their own backend, so a smaller set is genuinely benchmarkable. We say which, and
-why, with a source for each claim.
+The split is the contribution: most of the registry is hostable — a model-enforced
+eval where it routes through the gateway, runnable where it doesn't — and only a few
+agents can't be hosted at all. We say which, and why, with a source for each claim.
 
 ## Use it
 
@@ -61,6 +69,10 @@ for a in by_status(CATALOG):
 ```
 
 ## Wired agents
+
+Thirteen agents are wired — registered here and gateway-routed by construction; the
+full list, with each one's recipe and recorded verification, is in
+[AGENTS.md](AGENTS.md). Two are worked end-to-end below as the illustrative cases.
 
 ### [Qwen Code](https://github.com/QwenLM/qwen-code) (`qwen-code`)
 
@@ -121,49 +133,24 @@ launch → route → execute → file access all work); whether it *solves* a ha
 is the agent+model's business. `OPENAI_HOST`+`OPENAI_BASE_PATH` assume a host-only
 base URL (true for DeepSeek and the gateway) — see its `known_issue`.
 
-## Live verification (truth table)
+## Live verification
 
-**Every** BYO-tier agent was run through the pipeline (spec-extraction → install →
-launch → task) on Daytona/DeepSeek, then a per-agent fix fan-out (one subagent each,
-root-causing from rollout artifacts + upstream source) re-probed the failures.
-Honest results — **the 2 wired agents (qwen-code, goose) work end-to-end**
-(deepagents has since graduated to a BenchFlow built-in, see below); the rest
-each hit a concrete, confirmed blocker:
+Every adapting agent was run through the pipeline (spec-extraction → install →
+launch → ACP handshake → task) on Daytona/DeepSeek, with subagent fix fan-outs
+root-causing each failure from rollout artifacts + upstream source. That work is what
+produced the current tiering: **13 wired** route the model through the gateway by
+construction and **6 native** ship as BenchFlow built-ins — 19 model-enforced evals
+in all; **14 runnable** install + launch + handshake but log the ACP trajectory only
+(the model stays on the agent's own/vendor backend); and three can't be hosted —
+**1 catalog** (`kimi`, blocked on mandatory interactive OAuth, recipe recorded),
+**1 vendor-locked** (`cursor`), and **1 out-of-scope** (`agoragentic-acp`, a marketplace).
 
-| Agent | Dist | Live result |
-|---|---|---|
-| `qwen-code` | npx | ✅ **verified** — reward 1.0 hello-world & real citation-check; gateway usage captured |
-| `goose` | binary | ✅ **verified-runs** — reward 1.0 hello-world; real task ran clean (reward 0.0 — agent didn't solve, not an integration failure) |
-| `deepagents` | npx | ✅ **now native** — graduated to a BenchFlow built-in (`deepagents`) + an `acp/deepagents/` manifest; the npm-wired recipe (reward 1.0 hello-world; fix: install `@langchain/openai` + `--model openai:<m>`) is preserved in git history |
-| `kilo` | npx | ⚠️ **probe-green** (reward 1.0 hello-world with an *install-time* config) — but the package's generic *launch-time* config-write regressed (`pipe_closed`); closest to wireable |
-| `vtcode` | binary | ⚠️ round-2 fixed the loader (`ldconfig` for the bundled `libghostty-vt.so`) + the missing key mapping; now gets further, exits `rc=255` at provider/config init |
-| `cline` | npx | ⚠️ round-2 `cline auth` prelude cleared the `-32000` — it now **runs** but timed out at 600s with 0 tools |
-| `dirac` | npx | ⚠️ speaks ACP, enters loop, exits mid-run |
-| `codebuddy-code` | npx | ⚠️ reaches ACP, then `-32603` |
-| `crow-cli` | uvx | ⚠️ Python 3.14 + `uvx` + a `crow-mcp` subprocess; exits `rc=255` |
-| `mistral-vibe` | binary | ⚠️ `pipe_closed` / install-runtime issues |
-| `minion-code` | uvx | ⚠️ `rc=2` at launch |
-| `junie` | binary | ⚠️ `rc=127` (JetBrains; needs a JVM) |
-| `dimcode` | npx | ❌ `-32000` — provider creds are interactive-only (`/connect`, sqlite); not headless |
-| `github-copilot-cli` | npx | ❌ `-32000` — BYOK not honored in ACP mode on `@github/copilot@1.0.61` |
-| `grok-build` | binary | ❌ install `rc=1` — xAI-gated download (SuperGrok) |
-| `stakpak` | binary | ❌ research hard-block — ACP path has a model→provider routing defect on v0.3.88 (validated against source) |
-| `kimi` | binary | ❌ research hard-block — mandatory interactive OAuth, no headless path |
-| `autohand` | npx | ❌ research hard-block — not headless-configurable for an arbitrary endpoint+key+model |
-| `poolside` | binary | ❌ research hard-block — not headless-wirable to a custom endpoint over ACP |
-
-⚠️ = installs + launches but the ACP session fails (a bounded per-agent fix: exact
-config schema, base-URL suffix, runtime dep, or — for `kilo` — moving the
-config-write to install time). ❌ = a real blocker (auth gate, interactive-only
-config, gated install, or upstream defect). **Two fix rounds** (subagent fan-outs
-that root-caused each failure from rollout artifacts + upstream source) turned
-`deepagents` green and pushed several others much closer (`kilo` probe-green,
-`cline` now runs, `vtcode`'s loader fixed). The pipeline
-(`spec-extraction → probe-gen → live-verify → fix`) is reusable, so each remaining
-⚠️ is a known, bounded task rather than open research.
-
-Vendor-locked agents (9) + the marketplace entry can't run as model-enforced evals
-at all; the 6 native agents already ship in BenchFlow.
+Per-agent status — tier, the exact wiring recipe, the recorded verification, and any
+known issue — is generated into **[AGENTS.md](AGENTS.md)** from
+[`catalog.py`](src/acp_registry/catalog.py), the single source of truth; this README
+deliberately does not maintain a second copy. The pipeline (`spec-extraction →
+probe-gen → live-verify → fix`) is reusable, so each remaining wiring task is bounded
+and known rather than open research.
 
 ## Adding more agents
 

@@ -49,7 +49,7 @@ Install + launch headlessly in a benchflow task env: BenchFlow creates the exper
 
 ## Catalog (1)
 
-These can be pointed at an arbitrary OpenAI/Anthropic-compatible base URL, so they're adaptable — each is held back only by something this npx-only first pass doesn't ship (a config-file writer, a binary installer, a uvx bootstrap, or a model-id format BenchFlow can't emit). The **Recipe** column is the exact next step to wire it.
+These can be pointed at an arbitrary OpenAI/Anthropic-compatible base URL, so they're adaptable — each is held back by a config-file writer, a binary/uvx installer, or a model-id format BenchFlow can't emit. The **Recipe** column is the exact next step to wire it (or why it's blocked).
 
 | Agent | id | License | Dist | Recipe to wire |
 |---|---|---|---|---|
