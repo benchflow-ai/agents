@@ -43,15 +43,22 @@ _ORDER = (WIRED, RUNNABLE, CATALOG, NATIVE, VENDOR_LOCKED, OUT_OF_SCOPE)
 _SECTION = {
     WIRED: (
         "Wired — registered + routes correctly by construction",
-        "`register()` installs these. Routing is verified *by construction* "
+        "`register()` installs these. BenchFlow creates the experiment, routes the "
+        "model through its gateway, and tracks BOTH the raw-LLM trajectory (proxy "
+        "capture) AND the ACP-trajectory logs. Routing is verified *by construction* "
         "(confirmed env vars + a model format BenchFlow can emit); see the "
         "honesty bar in the README for what that does and doesn't claim.",
     ),
     RUNNABLE: (
         "Runnable — installs + launches headless, but model not gateway-enforced",
-        "Install + launch headlessly in a benchflow task env; model runs on the "
-        "agent's own/vendor backend (not gateway-enforced). Executable, not a "
-        "faithful model-controlled eval. `register()` does not install these.",
+        "Install + launch headlessly in a benchflow task env: BenchFlow creates the "
+        "experiment and tracks the **ACP-trajectory logs**, but the model runs on the "
+        "agent's own/vendor backend so the **raw-LLM proxy is NOT captured** (per-agent "
+        "caveats in each row). Executable, not a faithful model-controlled eval. "
+        "**Pre-merge verified:** every committed `install_cmd` runs end-to-end (produces "
+        "the launch binary) and the ACP handshake (initialize + session/new) succeeds; "
+        "BenchFlow discovers these via the `acp/<id>/manifest.toml` loader (`register()` "
+        "does not install them). Vendor-backed agents need their own creds at eval time.",
     ),
     CATALOG: (
         "Catalog — BYO-redirectable, recipe given, not yet wired",
@@ -103,7 +110,12 @@ def main() -> None:
         f"All **{total}** agents in the Agent Client Protocol registry "
         f"(snapshot `v{ver}`, see [`registry.snapshot.json`](registry.snapshot.json)), "
         "classified by whether they can run as a faithful, model-enforced BenchFlow "
-        "eval. Source of truth: [`src/acp_registry/catalog.py`](src/acp_registry/catalog.py)."
+        "eval. The bar for adaptation is **BenchFlow can create the experiment and "
+        "track the run's logs**: `wired` + `native` capture both the raw-LLM "
+        "trajectory (gateway proxy) and the ACP-trajectory logs; `runnable` captures "
+        "the ACP-trajectory logs only (the model runs on the agent's own/vendor "
+        "backend, so the LLM proxy is not captured). Source of truth: "
+        "[`src/acp_registry/catalog.py`](src/acp_registry/catalog.py)."
     )
     out.append("")
     counts = " · ".join(
