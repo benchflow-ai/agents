@@ -22,8 +22,11 @@ const model = arg("model", "mock-model");
 const cwd = arg("cwd", mkdtempSync(join(tmpdir(), "parity-")));
 const prompt = arg("prompt", "Create a file named hello.txt in the current directory containing exactly: Hello, world!");
 
+// Record THIS capture's own cwd (MOCK_CWD) so the parity normalizer can collapse
+// the standalone temp-dir to <CWD> symmetrically with the hosted /app — instead of
+// scraping it back out of the prompt. mock_upstream stamps it on every logged line.
 const mock = spawn(process.execPath, [join(HERE, "mock_upstream.mjs")],
-  { env: { ...process.env, PORT: String(port), REQ_LOG: out, MOCK_TAG: "capture" }, stdio: ["ignore", "inherit", "inherit"] });
+  { env: { ...process.env, PORT: String(port), REQ_LOG: out, MOCK_TAG: "capture", MOCK_CWD: cwd }, stdio: ["ignore", "inherit", "inherit"] });
 await new Promise((r) => setTimeout(r, 600));
 
 const baseUrl = `http://127.0.0.1:${port}/v1`;

@@ -27,6 +27,16 @@ from dataclasses import dataclass, field
 
 _BENCHFLOW_ALIAS_PREFIX = "benchflow-"
 
+#: Sentinel key carrying a capture's OWN recorded cwd into normalization. It is a
+#: meta annotation (stamped by ``load_capture`` from the JSONL ``cwd`` field, or
+#: passed via ``normalize_request(..., cwd=...)``), NOT an upstream request field —
+#: ``normalize_request`` pops it before comparison so it never participates in
+#: equality. Recording each side's own cwd is what makes the ``sandbox-cwd``
+#: collapse SYMMETRIC: the standalone temp-dir and the hosted ``/app`` each reduce
+#: to ``<CWD>`` via their own recorded value instead of one side relying on a
+#: hard-coded token and the other on fragile system-prompt scraping.
+_CAPTURE_CWD_KEY = "__parity_cwd__"
+
 
 def _canonical_model(model: object) -> object:
     """Reduce a model id to its provider-agnostic upstream name so the gateway's
@@ -91,7 +101,12 @@ def _rule_model_alias(body: dict) -> None:
 
 
 def _rule_sandbox_cwd(body: dict) -> None:
-    cwd = _cwd_from_messages(body.get("messages", []))
+    # Prefer the capture's OWN recorded cwd (symmetric: each side collapses its own
+    # task dir), then fall back to scraping the system prompt for backward compat
+    # with captures that predate cwd recording. ``_sub_cwd`` still collapses ONLY
+    # the cwd PREFIX (boundary-anchored), so a genuinely different write *directory*
+    # under that cwd (src/ vs tests/) survives and a real divergence still FAILs.
+    cwd = body.get(_CAPTURE_CWD_KEY) or _cwd_from_messages(body.get("messages", []))
     _walk_content_strings(body, lambda t: _sub_cwd(t, cwd))
 
 
@@ -140,14 +155,25 @@ _RULES: list[tuple[str, Callable[[dict], None]]] = [
 NEUTRAL_DIFFS: list[str] = [name for name, _ in _RULES]
 
 
-def normalize_request(body: dict, rules: Iterable[str] | None = None) -> dict:
+def normalize_request(
+    body: dict, rules: Iterable[str] | None = None, cwd: str | None = None
+) -> dict:
     """Collapse the expected-neutral differences (a subset of ``NEUTRAL_DIFFS``,
-    default all) so two captures of the *same* behavior compare equal."""
+    default all) so two captures of the *same* behavior compare equal.
+
+    ``cwd`` is this capture's OWN recorded task directory; when given it drives the
+    ``sandbox-cwd`` collapse (each side's own cwd -> ``<CWD>``, symmetrically) and
+    overrides any cwd stamped on ``body`` by ``load_capture``. The cwd annotation
+    is popped before the result is returned, so it never participates in equality.
+    """
     active = set(NEUTRAL_DIFFS if rules is None else rules)
     b = json.loads(json.dumps(body))
+    if cwd is not None:
+        b[_CAPTURE_CWD_KEY] = cwd  # explicit cwd overrides any stamped value
     for name, fn in _RULES:
         if name in active:
             fn(b)
+    b.pop(_CAPTURE_CWD_KEY, None)  # meta annotation, never compared
     return b
 
 
@@ -229,6 +255,23 @@ def compare_outcomes(expected: dict, actual: dict) -> OutcomeParityResult:
 
 
 def load_capture(path: str) -> list[dict]:
-    """Load upstream request bodies from a mock_upstream.mjs JSONL capture."""
+    """Load upstream request bodies from a mock_upstream.mjs JSONL capture.
+
+    When a record carries a ``cwd`` field (the agent's OWN task directory, recorded
+    by ``mock_upstream.mjs`` from ``MOCK_CWD``), stamp it onto the body under
+    ``_CAPTURE_CWD_KEY`` so ``normalize_request`` collapses that side's cwd to
+    ``<CWD>`` — making the collapse symmetric across a standalone temp-dir and a
+    hosted ``/app`` without relying on a hard-coded token. The stamp is popped
+    before comparison, so it never affects equality."""
+    out: list[dict] = []
     with open(path) as fh:
-        return [json.loads(line)["body"] for line in fh if line.strip()]
+        for line in fh:
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            body = rec["body"]
+            cwd = rec.get("cwd")
+            if cwd:
+                body[_CAPTURE_CWD_KEY] = cwd
+            out.append(body)
+    return out
