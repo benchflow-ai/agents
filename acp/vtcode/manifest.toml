@@ -1,0 +1,39 @@
+contract_version = "1.0"
+name = "vtcode"
+description = "VT Code (vinhnx/VTCode), a Rust coding agent, over ACP (per-arch Linux binary, 0.133.19). Routes any OpenAI-compatible host via a launch-written vtcode.toml [[custom_providers]] (base_url + api_key_env) + [agent] provider/default_model, with the ACP bridge enabled by VT_ACP_ENABLED=1 (+ VT_ACP_ZED_* tool toggles). base_url MUST carry the /v1 suffix because vtcode POSTs {base_url}/chat/completions with no auto-append; benchflow's gateway base URL already ends in /v1. supports_acp_set_model is false: the model is config-owned (default_model), delivered at launch, not over ACP (acp_smoke routed with no --set-model). Verified wired-by-construction: acp_smoke routed 1 upstream /chat/completions (model=deepseek-v4-flash bare, 3 messages, 5 tools forwarded) on the `standard` ACP target. CAVEAT: a prior DeepSeek/Daytona probe saw the agent close stdout (pipe_closed) after the session opened; the routing call still fires (N=1), but full real-task stability is unverified."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates tar) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://github.com/vinhnx/VTCode/releases/download/0.133.19/vtcode-0.133.19-x86_64-unknown-linux-gnu.tar.gz";; aarch64|arm64) U="https://github.com/vinhnx/VTCode/releases/download/0.133.19/vtcode-0.133.19-aarch64-unknown-linux-gnu.tar.gz";; *) echo "no vtcode binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/vtcode; curl -fsSL "$U" -o /tmp/bf-vtcode.tar.gz; tar -xzf /tmp/bf-vtcode.tar.gz -C /opt/benchflow/acp/vtcode; chmod +x /opt/benchflow/acp/vtcode/vtcode 2>/dev/null || true; chmod -R a+rX /opt/benchflow/acp/vtcode; [ -x /opt/benchflow/acp/vtcode/vtcode ]'''
+launch_cmd = '''set -e; CFGDIR="$(mktemp -d)"; CFG="$CFGDIR/vtcode.toml"; cat > "$CFG" <<EOF
+[agent]
+provider = "benchflow"
+api_key_env = "OPENAI_API_KEY"
+default_model = "${BENCHFLOW_PROVIDER_MODEL}"
+reasoning_effort = "low"
+
+[acp]
+enabled = true
+
+[acp.zed]
+enabled = true
+transport = "stdio"
+
+[acp.zed.tools]
+read_file = true
+list_files = true
+
+[[custom_providers]]
+name = "benchflow"
+display_name = "BenchFlow Gateway"
+base_url = "${BENCHFLOW_PROVIDER_BASE_URL}"
+api_key_env = "OPENAI_API_KEY"
+model = "${BENCHFLOW_PROVIDER_MODEL}"
+models = ["${BENCHFLOW_PROVIDER_MODEL}"]
+EOF
+cd /opt/benchflow/acp/vtcode && VT_ACP_ENABLED=1 VT_ACP_ZED_ENABLED=1 VT_ACP_ZED_TOOLS_READ_FILE_ENABLED=1 VT_ACP_ZED_TOOLS_LIST_FILES_ENABLED=1 exec ./vtcode --config "$CFG" acp standard'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["vtcode", "vt-code"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_API_KEY = "OPENAI_API_KEY"

@@ -307,19 +307,28 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="acp",
-        status=CATALOG,
+        status=WIRED,
         summary="Rust coding agent; [[custom_providers]] with arbitrary base_url.",
         api_protocol="openai-completions",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+        },
         model_via="config-file",
-        known_issue="PROBED on DeepSeek/Daytona: installs + launches, then closes "
-        "stdout at the ACP session (`pipe_closed`). Config is "
-        "$HOME/.config/vtcode/vtcode.toml ([[custom_providers]] base_url + "
-        "api_key_env + [agent] provider/default_model); note base_url must include "
-        "the `/v1` suffix (vtcode posts to {base_url}/chat/completions, no "
-        "auto-append). Closest of the binary config-file agents — needs the "
-        "session failure root-caused.",
-        reason="BYO via vtcode.toml [[custom_providers]] base_url + api_key_env "
-        "+ models (+ VT_ACP_ENABLED=1). Per-arch binary installs fine.",
+        bin_name="vtcode",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 1 upstream "
+            "/v1/chat/completions, stopReason end_turn — wired by construction, "
+            "no real-task reward claimed",
+        ),
+        known_issue="A prior DeepSeek/Daytona probe saw vtcode close stdout "
+        "(`pipe_closed`) after the session opened; the routing call still fires "
+        "(smoke N=1), but full real-task stability is unverified.",
+        reason="Per-arch Linux binary; routes any OpenAI-compatible host via a "
+        "launch-written vtcode.toml [[custom_providers]] (base_url + "
+        "api_key_env=OPENAI_API_KEY) + [agent] default_model, with the ACP bridge "
+        "enabled by VT_ACP_ENABLED=1 — that config-file writer is what unblocked "
+        "it. base_url must include the /v1 suffix (vtcode posts "
+        "{base_url}/chat/completions, no auto-append).",
         source="https://github.com/vinhnx/vtcode",
     ),
     AcpAgent(
@@ -329,13 +338,27 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         repository="https://github.com/crow-cli/crow-cli",
         distribution=BINARY,
         package="",
-        acp_args="",
-        status=CATALOG,
+        acp_args="acp",
+        status=WIRED,
         summary="Vendor-agnostic agent; any OpenAI-compatible endpoint.",
         api_protocol="openai-completions",
-        model_via="config-file",
-        reason="BYO via ~/.crow/config.yaml provider/base_url/api_key/model "
-        "(${ENV} interpolation). Needs a binary installer + config-file writer.",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "OPENAI_MODEL",
+        },
+        model_via="env",
+        bin_name="crow-cli",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
+            "/v1/chat/completions, stopReason end_turn — wired by construction, "
+            "no real-task reward claimed",
+        ),
+        reason="Per-arch Linux binary (`crow-cli acp`); routes any "
+        "OpenAI-compatible host via a launch-written ~/.crow config.yaml "
+        "(providers/base_url/api_key/model with ${ENV} interpolation) — the binary "
+        "installer + config-file writer (which also ships the required crow-mcp "
+        "tool server and a full sqlite:/// db_uri) is what unblocked it.",
         source="https://github.com/crow-cli/crow-cli",
     ),
     AcpAgent(
@@ -365,14 +388,27 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="",
-        status=CATALOG,
+        status=WIRED,
         summary="Mistral's agent; custom provider presets with api_style=openai "
         "+ arbitrary api_base. ACP via the vibe-acp binary.",
         api_protocol="openai-completions",
-        model_via="config-file",
-        reason="BYO via ~/.vibe/config.toml [[providers]] api_base + "
-        "api_key_env_var. Ships a dedicated vibe-acp Linux binary; needs binary "
-        "installer + config writer.",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "OPENAI_MODEL",
+        },
+        model_via="env",
+        bin_name="vibe-acp",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
+            "/v1/chat/completions, stopReason end_turn — wired by construction, "
+            "no real-task reward claimed",
+        ),
+        reason="Dedicated `vibe-acp` per-arch Linux binary; routes any "
+        "OpenAI-compatible host via a launch-written ~/.vibe/config.toml "
+        "[[providers]] (api_base + api_key_env_var=OPENAI_API_KEY, "
+        "api_style=openai) + [[models]] active_model — the binary installer + "
+        "config writer is what unblocked it.",
         source="https://github.com/mistralai/mistral-vibe",
     ),
     AcpAgent(
@@ -383,23 +419,31 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="@kilocode/cli",
         acp_args="acp --log-level ERROR --print-logs",
-        status=CATALOG,
+        status=WIRED,
         summary="Kilo Code CLI (OpenCode-based); a kilo.jsonc declares an "
         "@ai-sdk/openai-compatible provider.",
         api_protocol="openai-completions",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "OPENAI_MODEL",
+        },
+        model_via="env",
         bin_name="kilo",
-        model_via="config-file",
-        known_issue="PROBED green (reward 1.0 hello-world) when its kilo.jsonc was "
-        "written at INSTALL time with the model baked in. The package's generic "
-        "LAUNCH-time config-write (`python3 -c … && kilo acp`) regressed to "
-        "pipe_closed — benchflow's launch context doesn't run the config-write "
-        "reliably, and kilo's model id can't ride its `{env:}` substitution (it's a "
-        "config KEY, not an option value). Wiring it generically needs an "
-        "install-time config-writer that templates the benchmark model — deferred.",
-        reason="npx (@kilocode/cli). kilo.jsonc declares a `deepseek` "
-        "@ai-sdk/openai-compatible provider (baseURL + {env:…} key). Works with an "
-        "install-time written config; the generic launch-time writer needs work "
-        "(see known_issue).",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
+            "/v1/chat/completions, stopReason end_turn — wired by construction, "
+            "no real-task reward claimed",
+        ),
+        known_issue="kilo.json's baseURL is written verbatim, so the gateway base "
+        "URL must already carry any required path suffix (e.g. .../v1); a host-only "
+        "base needs the suffix appended.",
+        reason="npx (@kilocode/cli); routes any OpenAI-compatible provider via a "
+        "launch-time kilo.json writer that declares a `deepseek` "
+        "@ai-sdk/openai-compatible provider (baseURL + {env:OPENAI_API_KEY}) and "
+        "templates the benchmark model from $OPENAI_MODEL into the config (the "
+        "model is a config KEY, so it can't ride kilo's {env:} value substitution) "
+        "— that config-file writer is what unblocked it.",
         source="https://kilo.ai/docs/code-with-ai/platforms/cli",
     ),
     AcpAgent(
@@ -410,24 +454,32 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="dirac-cli",
         acp_args="--acp",
-        status=CATALOG,
+        status=WIRED,
         summary="BYO agent: 'use any OpenAI-compatible provider by providing the "
         "base URL and model ID.'",
         api_protocol="openai-completions",
         env_mapping={
             "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_API_BASE",
             "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "OPENAI_MODEL",
         },
+        model_via="env",
         bin_name="dirac",
-        model_via="flag",
-        known_issue="PROBED on DeepSeek/Daytona: dirac DOES speak ACP (the "
-        "registry's `--acp` is correct; an earlier README-only audit that claimed "
-        "'no ACP' was wrong), and it got into the loop (1 tool call) — but the "
-        "process then closed its stdout mid-run (benchflow `pipe_closed`), so the "
-        "task didn't complete. Needs debugging (likely a dirac-side exit) before "
-        "it can be wired.",
-        reason="npx, pure-JS, reads OPENAI_API_BASE (not OPENAI_BASE_URL), model "
-        "via --model flag. ACP confirmed; held back on the mid-run stdout close.",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 6 upstream "
+            "/v1/chat/completions, stopReason end_turn — wired by construction, "
+            "no real-task reward claimed",
+        ),
+        known_issue="dirac can close its stdout mid-run (benchflow `pipe_closed`); "
+        "if it routes >=1 request first it still counts as routed, and the smoke "
+        "saw a clean end_turn (6 requests), but full real-task stability is "
+        "unverified.",
+        reason="npx, pure-JS (reads OPENAI_API_BASE, not OPENAI_BASE_URL); ACP "
+        "mode ignores the --model/--provider flags, so the launch seeds persisted "
+        "config non-interactively via `dirac auth --provider openai --modelid "
+        "$OPENAI_MODEL --baseurl $OPENAI_API_BASE --config <dir>`, forcing the "
+        "openai-compatible provider through the gateway — that config seeder is "
+        "what unblocked it.",
         source="https://github.com/dirac-run/dirac",
     ),
     AcpAgent(
@@ -469,10 +521,13 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
             "BENCHFLOW_PROVIDER_API_KEY": "OPENAI__API_KEY",
         },
         model_via="flag",
-        reason="BYO via OPENAI__BASE_URL / OPENAI__API_KEY (pydantic nested env, "
-        "NOT plain OPENAI_BASE_URL) or fastagent.config.yaml, + --model. "
-        "uvx-distributed, so it needs a uv bootstrap this npx-only first pass "
-        "doesn't ship.",
+        reason="Routing is smoke-verified (1 upstream /v1/chat/completions, "
+        "model=deepseek-v4-flash) via uvx, but it stays CATALOG only because "
+        "uvx-wired is out of this pass's npx-or-binary policy. Exact coords: PyPI "
+        "fast-agent-acp==0.7.18 (console script from its dep "
+        "fast-agent-mcp==0.7.18); reads pydantic nested env OPENAI__BASE_URL / "
+        "OPENAI__API_KEY (NOT plain OPENAI_BASE_URL) + --model openai.<id>; needs "
+        "a uv-managed CPython 3.13 bootstrap.",
         source="https://fast-agent.ai/ref/config_file/",
     ),
     AcpAgent(
@@ -503,19 +558,29 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         package="@compass-ai/nova",
         acp_args="acp",
         status=CATALOG,
-        summary="BYO agent; reads standard provider keys + base-URL overrides "
-        "(Compass platform is an optional routing layer).",
+        summary="Agent built on @anthropic-ai/sdk; over ACP it serves only "
+        "built-in Claude models (anthropic-messages), retargetable solely via "
+        "COMPASS_ANTHROPIC_BASE_URL.",
         api_protocol="anthropic-messages",
         env_mapping={
-            "BENCHFLOW_PROVIDER_BASE_URL": "ANTHROPIC_BASE_URL",
+            "BENCHFLOW_PROVIDER_BASE_URL": "COMPASS_ANTHROPIC_BASE_URL",
             "BENCHFLOW_PROVIDER_API_KEY": "ANTHROPIC_API_KEY",
         },
         bin_name="nova",
         model_via="env",
-        reason="npx — close to wireable via ANTHROPIC_BASE_URL or "
-        "DEFAULT_OPENAI_BASE_URL + model env. Held back to first verify the "
-        "optional Compass routing layer can be fully bypassed with raw "
-        "ANTHROPIC_BASE_URL (it bundles @anthropic-ai/sdk).",
+        reason="npx (@compass-ai/nova), but NOT wireable to BenchFlow's "
+        "openai-completions gateway as-is — three source-read corrections: "
+        "(1) the standard ANTHROPIC_BASE_URL is IGNORED — nova's resolveBaseUrl "
+        "takes the Claude model-registry baseUrl (https://api.anthropic.com); the "
+        "ONLY env that retargets its anthropic provider is "
+        "COMPASS_ANTHROPIC_BASE_URL; (2) DEFAULT_OPENAI_BASE_URL is NOT an env "
+        "var, just an internal constant (the OpenAI base URL is not "
+        "env-overridable); (3) nova's ACP runtime is anthropic-messages ONLY and "
+        "exposes ONLY built-in Claude models over ACP, so it cannot serve the "
+        "openai-completions gateway / deepseek-v4-flash (smoke logged "
+        "upstreamRequests=0 for the ACP turn). Usable only if the gateway exposes "
+        "an anthropic-messages endpoint AND the run uses a Claude-family model id "
+        "via COMPASS_ANTHROPIC_BASE_URL.",
         source="https://github.com/Compass-Agentic-Platform/nova",
     ),
     AcpAgent(
