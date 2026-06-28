@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](#license)
 
 [The eval ↔ prod gap](#the-eval--prod-gap) ·
-[Agents](#agents) ·
+[Agents](#agents-three-paths-into-benchflow) ·
 [Tiers](#tiers-how-faithfully-can-we-host-it) ·
 [Parity](#parity-the-same-agent-in-both) ·
 [Adapt a new agent](#adapt--verify-a-new-agent) ·
@@ -36,22 +36,23 @@ agents are general, tool-using agent frameworks (build any agent), and BenchFlow
 evaluations span well beyond code. The repo is a home for agents of any kind that
 you want to both ship and benchmark.
 
-## Agents
+## Agents: three paths into BenchFlow
 
-| Family | Agents | Eval on BenchFlow |
-|---|---|---|
-| [**mini-swe**](acp/mini-swe-code/) | [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) behind opencode's TUI ([mini-swe-code](acp/mini-swe-code/)) + an ACP shim ([mini-swe-acp](acp/mini-swe-acp/)) | ✅ stable — faithful SWE-agent harness (>74% SWE-bench verified) |
-| [**ai-sdk**](ai-sdk/) | the Vercel AI SDK agent surface — `ToolLoopAgent` ([acp](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/), [mimo](ai-sdk/harness-mimo/)} | mixed — `acp` ✅ (parity byte-verified), `harness-pi` ✅ (file tasks), `codex`/`claude-code` 🧪 (need a Vercel sandbox). Per-agent maturity in [ai-sdk/README](ai-sdk/README.md). |
-| [**omnigent**](omnigent/) | [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents) `pi` meta-harness — the first **non-ACP** agent here: rides BenchFlow's Session path via a `session_factory`, shelling `omnigent run` inside the sandbox | ✅ reward 1.0 on hello-world **and** the real `citation-check` research task (DeepSeek/Daytona x86_64). Needs a BenchFlow with the session-factory seam — see [omnigent/README](omnigent/README.md). |
-| [**mimo**](acp/mimo-acp/) | [MiMo Code](https://mimo.xiaomi.com/mimocode) (Xiaomi, an OpenCode fork) — its `mimo` CLI ships a **native** `mimo acp` server, registered out-of-core ([mimo-acp](acp/mimo-acp/)); no `server.mjs` (mimo *is* the ACP server), structurally like `mini-swe-acp` | ✅ the free `mimo/mimo-auto` channel runs headless. The flagship `xiaomi/mimo-v2.5-pro` (reward 1.0 on `citation-check`) is the native `mimo` agent in benchflow core — `bare` strips the `xiaomi/` prefix here. |
-| [**acp-registry**](acp-registry/) | the [Agent Client Protocol registry](https://agentclientprotocol.com/get-started/registry) — **36 agents** (goose, Qwen Code, Stakpak, GitHub Copilot, GLM, …) classified onto BenchFlow; the **33 that adapt** ship a declarative [`acp/<id>/manifest.toml`](acp/) (no adapter code; they already speak ACP) | classified into [six tiers](#tiers-how-faithfully-can-we-host-it): **13 wired** + **6 native** run as faithful model-enforced evals; **14 runnable** install + launch with ACP-trajectory logging. Full per-agent table: [acp-registry/AGENTS.md](acp-registry/AGENTS.md). |
+Every agent reaches BenchFlow through one of **three paths**, by how it's wrapped —
+each a top-level directory:
 
-Agents come in two shapes: a few **self-contained packages** (the `mini-swe-*`
-runtimes, the `ai-sdk/*` group, `omnigent`) — a production runtime + a thin adapter
-registered via the public `register_agent` extension point — and **declarative
-[`acp/<id>/manifest.toml`](acp/) agents** for the ACP-registry CLIs that already
-speak ACP (no adapter code; discovered via the manifest loader, classified by tier
-in [acp-registry](acp-registry/)).
+| Path | How an agent adapts | Agents in it | Eval on BenchFlow |
+|---|---|---|---|
+| [**`acp/`**](acp/) · ACP over stdio | a declarative [`acp/<id>/manifest.toml`](acp/) (registry CLIs that already speak ACP — no code), or a self-contained ACP package | the **[36-agent ACP registry](acp-registry/)** (goose, Qwen Code, Stakpak, GitHub Copilot, GLM, …) + [**mini-swe**](acp/mini-swe-code/) (SWE-agent behind opencode's TUI) + [**mimo**](acp/mimo-acp/) (Xiaomi MiMo Code, native `mimo acp`) | registry: **13 wired · 14 runnable · 6 native** ([tiers](#tiers-how-faithfully-can-we-host-it) · [AGENTS.md](acp-registry/AGENTS.md)); mini-swe ✅ stable (>74% SWE-bench verified); mimo ✅ free `mimo-auto` runs headless |
+| [**`ai-sdk/`**](ai-sdk/) · Vercel AI SDK | a pure-JS `server.mjs` + `register.py` wrapping the AI SDK agent | `ToolLoopAgent` ([**acp**](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/), [mimo](ai-sdk/harness-mimo/)} | `acp` ✅ parity byte-verified · `harness-pi` ✅ (file tasks) · `codex`/`claude-code` 🧪 (need a Vercel sandbox) — [ai-sdk/README](ai-sdk/README.md) |
+| [**`omnigent/`**](omnigent/) · non-ACP Session | a `session_factory` that shells `omnigent run` inside the sandbox | [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents) `pi` meta-harness — the **only non-ACP** agent here | ✅ reward 1.0 on hello-world **and** the real `citation-check` task (DeepSeek/Daytona x86_64); needs the session-factory seam — [omnigent/README](omnigent/README.md) |
+
+Within those paths an agent takes one of **two shapes**: a few **self-contained
+packages** (the `mini-swe-*` runtimes, the `ai-sdk/*` group, `omnigent`) — a
+production runtime + a thin adapter registered via the public `register_agent`
+extension point — or a **declarative [`acp/<id>/manifest.toml`](acp/) agent** for an
+ACP-registry CLI that already speaks ACP (no adapter code; discovered via the
+manifest loader, classified by tier in [acp-registry](acp-registry/)).
 
 ## Tiers: how faithfully can we host it?
 
