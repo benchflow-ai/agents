@@ -1,0 +1,30 @@
+contract_version = "1.0"
+name = "codebuddy-code"
+description = "Tencent Cloud CodeBuddy Code (a Claude-Code fork) over ACP. `--acp` routes the CLI into its headless bundle (dist/codebuddy-headless) and speaks ACP on stdin/stdout. Vendor-agnostic via the BYO escape hatch: a models.json custom model that the launcher writes. CodeBuddy treats a model as custom when its `id` starts with `custom:` OR its `tags` include \"custom\" (MODEL_TAG_CUSTOM=\"custom\"); custom models POST to <url>/chat/completions (OpenAI chat-completions). The model id IS the wire model name (the `model`/`name` fields are cosmetic), so the launcher uses a BARE id (no `custom:` prefix) tagged custom, giving a clean bare model on the wire. Routing is config/env-owned: models.json `url` and `apiKey` go through CodeBuddy's own ${ENV} interpolation (/\\$\\{([^}]+)\\}/g over process.env), and the default model is selected by CODEBUDDY_MODEL (process.env.CODEBUDDY_MODEL || settings 'model'); supports_acp_set_model=false. Login bypass: the default first run wants a Tencent /login, but pointing apiKey at a custom model + setting a dummy CODEBUDDY_API_KEY skips the OAuth gate entirely — ACP initialize + session/new succeed headlessly with NO login prompt. Isolation: CODEBUDDY_CONFIG_DIR overrides the ~/.codebuddy home so models.json + state live in a per-run dir. Verified WIRED on the routing smoke: 4 upstream /v1/chat/completions, bare model 'deepseek-v4-flash', initOk + non-null sessionId. stopReason is null/promptTimeout because the mock's canned reply does not satisfy CodeBuddy's internal topic-analyzer turn loop (it keeps re-requesting) — the ACP handshake is the anchor and it passed."
+install_cmd = '''export DEBIAN_FRONTEND=noninteractive; BF_NODE_DIR=/opt/benchflow/node; BF_NODE_VERSION=22.20.0; if [ ! -x "$BF_NODE_DIR/bin/node" ]; then   if ! command -v curl >/dev/null 2>&1 ||      ! command -v tar >/dev/null 2>&1 ||      ! command -v xz >/dev/null 2>&1; then     if command -v apt-get >/dev/null 2>&1; then       apt-get update -qq &&       apt-get install -y -qq curl ca-certificates tar xz-utils;     elif command -v dnf >/dev/null 2>&1; then       dnf -y install curl ca-certificates tar xz;     elif command -v apk >/dev/null 2>&1; then       apk add --no-cache curl ca-certificates tar xz;     else       echo 'BenchFlow JS agent bootstrap requires curl, tar, and xz' >&2;       exit 127;     fi;   fi;   arch="$(uname -m)";   case "$arch" in     x86_64|amd64) node_arch=x64 ;;     aarch64|arm64) node_arch=arm64 ;;     *) echo "Unsupported architecture for Node.js: $arch" >&2; exit 1 ;;   esac;   tmp="$(mktemp -d)";   mkdir -p /opt/benchflow;   curl -fsSLo "$tmp/node.tar.xz" "https://nodejs.org/dist/v${BF_NODE_VERSION}/node-v${BF_NODE_VERSION}-linux-${node_arch}.tar.xz";   rm -rf "$BF_NODE_DIR";   mkdir -p "$BF_NODE_DIR";   tar -xJf "$tmp/node.tar.xz" -C "$BF_NODE_DIR" --strip-components=1 --no-same-owner;   rm -rf "$tmp"; fi; export PATH="/opt/benchflow/node/bin:$PATH"; "$BF_NODE_DIR/bin/node" --version; "$BF_NODE_DIR/bin/npm" --version && mkdir -p /opt/benchflow/js-agents /opt/benchflow/bin && export PATH="/opt/benchflow/bin:/opt/benchflow/js-agents/bin:/opt/benchflow/node/bin:$PATH" && ( /opt/benchflow/node/bin/npm install -g --prefix /opt/benchflow/js-agents @tencent-ai/codebuddy-code@2.106.3 ) && printf '%s\n' '#!/bin/sh' 'exec /opt/benchflow/node/bin/node /opt/benchflow/js-agents/bin/codebuddy "$@"' > /opt/benchflow/bin/codebuddy && chmod +x /opt/benchflow/bin/codebuddy && chmod -R a+rX /opt/benchflow && [ -x /opt/benchflow/js-agents/bin/codebuddy ] && [ -x /opt/benchflow/bin/codebuddy ]'''
+launch_cmd = '''set -e; export CODEBUDDY_CONFIG_DIR="${CODEBUDDY_CONFIG_DIR:-$HOME/.codebuddy-bf}"; mkdir -p "$CODEBUDDY_CONFIG_DIR"; MODELID="${OPENAI_MODEL:-deepseek-v4-flash}"; cat > "$CODEBUDDY_CONFIG_DIR/models.json" <<JSON
+{
+  "models": [
+    {
+      "id": "${MODELID}",
+      "name": "${MODELID}",
+      "model": "${MODELID}",
+      "url": "\${OPENAI_BASE_URL}",
+      "apiKey": "\${OPENAI_API_KEY}",
+      "tags": ["custom"],
+      "maxTokens": 8192
+    }
+  ]
+}
+JSON
+export CODEBUDDY_MODEL="${MODELID}"; export CODEBUDDY_API_KEY="${OPENAI_API_KEY:-mock-key}"; export CODEBUDDY_BASE_URL="${OPENAI_BASE_URL}"; exec /opt/benchflow/bin/codebuddy --acp'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["codebuddy", "cbc", "codebuddy-code"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_BASE_URL = "OPENAI_BASE_URL"
+BENCHFLOW_PROVIDER_API_KEY = "OPENAI_API_KEY"
+BENCHFLOW_PROVIDER_MODEL = "OPENAI_MODEL"

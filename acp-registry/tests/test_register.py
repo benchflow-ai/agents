@@ -18,7 +18,7 @@ def test_register_returns_wired_ids() -> None:
 
 def test_register_subset_rejects_non_wired() -> None:
     with pytest.raises(KeyError):
-        register("stakpak")  # catalog, not wired
+        register("kimi")  # catalog, not wired
 
 
 @pytest.mark.parametrize(

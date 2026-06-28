@@ -1,0 +1,18 @@
+contract_version = "1.0"
+name = "junie"
+description = "JetBrains Junie CLI ('the LLM-agnostic coding agent') over native ACP (proprietary JetBrains zip, v1892.26 / 26.6.8; ELF launcher + bundled JRE, `--acp=true`). BYO any OpenAI-compatible host via a custom-model JSON profile the launcher writes to $JUNIE_HOME/models/bench.json (id=<wire model>, baseUrl, apiKey, apiType=OpenAICompletion), selected by its FILENAME STEM with `--model custom:bench` (NOT the inner id) plus `--model-location` and `--model-default-locations=false` to suppress JetBrains' built-in model menu. supports_acp_set_model is false: Junie exposes model choice as an ACP session config_option select (id=\"model\"), it has NO standard session/set_model, and the model is delivered via the JSON profile + --model flag (model_via=config-file). Verified headless on the routing smoke: installs + launches its ACP server, initialize -> session/new returns a real sessionId (e.g. session-260628-053651-acay), initOk=true. CAVEAT: under the relaxed smoke it did NOT route to the gateway (upstreamRequests=0, stopReason=cancelled) - the prompt turn ran on Junie's built-in default model path (config_option currentValue=gemini-3-flash-preview) rather than custom:bench; wiring it to the gateway would require driving the ACP `model` config_option select to 'custom:bench'. Proprietary (JetBrains AI Service ToS)."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates unzip) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://github.com/JetBrains/junie/releases/download/1892.26/junie-release-1892.26-linux-amd64.zip";; aarch64|arm64) U="https://github.com/JetBrains/junie/releases/download/1892.26/junie-release-1892.26-linux-aarch64.zip";; *) echo "no junie binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/junie; curl -fsSL "$U" -o /tmp/bf-junie.zip; unzip -q -o /tmp/bf-junie.zip -d /opt/benchflow/acp/junie; rm -f /tmp/bf-junie.zip; chmod +x /opt/benchflow/acp/junie/junie-app/bin/junie; chmod -R a+rX /opt/benchflow/acp/junie; [ -x /opt/benchflow/acp/junie/junie-app/bin/junie ]'''
+launch_cmd = '''set -e; JBIN=/opt/benchflow/acp/junie/junie-app/bin/junie; CFG="${JUNIE_HOME:-$HOME/.junie-bf}"; MODELS="$CFG/models"; mkdir -p "$MODELS"; cat > "$MODELS/bench.json" <<JSON
+{ "id": "${OPENAI_MODEL:-${BENCHFLOW_PROVIDER_MODEL}}", "baseUrl": "${OPENAI_BASE_URL:-${BENCHFLOW_PROVIDER_BASE_URL}}", "apiKey": "${OPENAI_API_KEY:-bench}", "apiType": "OpenAICompletion" }
+JSON
+export JUNIE_HOME="$CFG"; exec "$JBIN" --acp=true --skip-update-check --model custom:bench --model-location="$MODELS" --model-default-locations=false'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["junie"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_BASE_URL = "OPENAI_BASE_URL"
+BENCHFLOW_PROVIDER_API_KEY = "OPENAI_API_KEY"
+BENCHFLOW_PROVIDER_MODEL = "OPENAI_MODEL"

@@ -1,0 +1,13 @@
+contract_version = "1.0"
+name = "cortex-code"
+description = "Snowflake Cortex Code (the `cortex` / `coco` CLI, v1.0.73) over ACP, per-arch Linux binary (tarball, `cortex acp serve` stdio transport). VENDOR-LOCKED to Snowflake Cortex: the LLM runs server-side inside Snowflake and is selected by Cortex model name via the -m flag; there is NO BYO OpenAI/Anthropic base_url, so it cannot be routed through benchflow's gateway and the routing smoke shows upstreamRequests=0 (own backend). It is RUNNABLE under the relaxed bar: the ACP server launches headlessly and completes initialize -> session/new -> session/prompt with NO Snowflake connection present (connections list empty, no SNOWFLAKE_* env) -- auth is only needed to actually invoke a model, not to handshake. supports_acp_set_model is false (model delivered at launch via -m). At real eval time it would need a Snowflake account + CORTEX_USER role (programmatic access token / password) and a valid Cortex model name; benchflow's deepseek-v4-flash is not a Cortex model. env_mapping is best-effort: only an api key maps onto Snowflake's SNOWFLAKE_PASSWORD; base_url is unmappable. --bypass auto-approves tool calls so the agent does not block on permission prompts."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates tar gzip) ); A=$(uname -m); case "$A" in x86_64|amd64) U="https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-linux-amd64.tar.gz";; aarch64|arm64) U="https://sfc-repo.snowflakecomputing.com/cortex-code-cli/a4643c4278/1.0.73%2B180523.e6179a031de9/coco-1.0.73%2B180523.e6179a031de9-linux-arm64.tar.gz";; *) echo "no cortex-code binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/cortex-code; curl -fsSL "$U" -o /tmp/bf-cortex.tgz; tar -xzf /tmp/bf-cortex.tgz -C /opt/benchflow/acp/cortex-code; chmod -R a+rX /opt/benchflow; D=$(ls -d /opt/benchflow/acp/cortex-code/coco-*-linux-* | head -1); [ -x "$D/cortex" ]'''
+launch_cmd = '''set -e; D=$(ls -d /opt/benchflow/acp/cortex-code/coco-*-linux-* | head -1); M="${BENCHFLOW_PROVIDER_MODEL:-}"; exec "$D/cortex" acp serve --bypass ${M:+-m "$M"}'''
+protocol = "acp"
+api_protocol = "openai-completions"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["cortex", "cortex-code", "coco"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_API_KEY = "SNOWFLAKE_PASSWORD"

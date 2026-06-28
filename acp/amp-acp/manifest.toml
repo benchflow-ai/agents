@@ -1,0 +1,13 @@
+contract_version = "1.0"
+name = "amp-acp"
+description = "Sourcegraph Amp over ACP via the tao12345666333/amp-acp adapter (Apache-2.0 bridge, self-contained bun ELF v0.8.1). The adapter speaks ACP on stdio and delegates the actual turn to the Amp managed coding agent by spawning the `amp` native CLI (@ampcode/cli 0.0.1780291930-gf6d536) which it locates on PATH. RUNNABLE but NOT wired: Amp is a vendor-locked managed Sourcegraph service - auth is AMP_API_KEY ONLY, there is NO base-URL override, and the 'model' is a fixed curated mode set (smart/deep/rush, exposed as ACP NewSession config_options, not session/set_model), so the benchmark model cannot be enforced and traffic cannot be pointed at the gateway/mock. Verified headless on the ACP routing smoke (PORT 12013, dummy AMP_API_KEY): amp-acp initialized, initialize + session/new succeeded (initOk:true, sessionId returned) with NO interactive login prompt; session/prompt then spawns the amp CLI which fails only at the vendor auth check ('Invalid or missing API key') against Amp's own backend - i.e. it launches and handshakes headlessly, it just needs a real Amp key + Amp's own service at eval time. upstreamRequests=0 (own vendor backend). The interactive `amp login` / `amp-acp --setup` flows are bypassed by providing AMP_API_KEY via env."
+install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y -qq curl ca-certificates tar gzip) ); A=$(uname -m); case "$A" in x86_64|amd64) ADAPTER="https://github.com/tao12345666333/amp-acp/releases/download/v0.8.1/amp-acp-linux-x86_64.tar.gz"; CLI="https://registry.npmjs.org/@ampcode/cli-linux-x64/-/cli-linux-x64-0.0.1780291930-gf6d536.tgz";; aarch64|arm64) ADAPTER="https://github.com/tao12345666333/amp-acp/releases/download/v0.8.1/amp-acp-linux-aarch64.tar.gz"; CLI="https://registry.npmjs.org/@ampcode/cli-linux-arm64/-/cli-linux-arm64-0.0.1780291930-gf6d536.tgz";; *) echo "no amp-acp binary for $A" >&2; exit 1;; esac; mkdir -p /opt/benchflow/acp/amp-acp; cd /opt/benchflow/acp/amp-acp; curl -fsSL "$ADAPTER" | tar -xz; curl -fsSL "$CLI" | tar -xz; mv package/amp ./amp; rm -rf package; chmod +x amp-acp amp; chmod -R a+rX /opt/benchflow; [ -x /opt/benchflow/acp/amp-acp/amp-acp ] && [ -x /opt/benchflow/acp/amp-acp/amp ]'''
+launch_cmd = '''export PATH=/opt/benchflow/acp/amp-acp:$PATH; export AMP_API_KEY="${AMP_API_KEY:-bf-amp-placeholder}"; exec /opt/benchflow/acp/amp-acp/amp-acp'''
+protocol = "acp"
+api_protocol = "anthropic-messages"
+acp_model_format = "bare"
+supports_acp_set_model = false
+aliases = ["amp", "amp-acp"]
+
+[env_mapping]
+BENCHFLOW_PROVIDER_API_KEY = "AMP_API_KEY"

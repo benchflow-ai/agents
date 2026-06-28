@@ -15,6 +15,11 @@ registry cleanly:
 ``wired``         Registered by this package with a provider profile that routes
                   correctly **by construction** (confirmed env vars + a model
                   format BenchFlow can emit). ``register()`` installs it.
+``runnable``      Installs + launches its ACP server headlessly in a benchflow
+                  task env, but its model is NOT enforced through BenchFlow's
+                  gateway (it runs on its own/vendor backend, or needs a vendor
+                  key at eval time). Executable, but not a faithful
+                  model-controlled eval. ``register()`` does NOT install these.
 ``catalog``       BYO-provider: the agent *can* be pointed at an arbitrary
                   OpenAI/Anthropic-compatible base URL, so it is adaptable — but
                   it is not wired yet because it needs something this first pass
@@ -41,11 +46,17 @@ from dataclasses import dataclass, field
 # --- status taxonomy -------------------------------------------------------
 NATIVE = "native"
 WIRED = "wired"
+# RUNNABLE — installs + launches its ACP server headlessly in a benchflow task
+# env, but its model is NOT enforced through BenchFlow's gateway (it runs on its
+# own/vendor backend, or needs a vendor key at eval time). Executable, but not a
+# faithful model-controlled eval. (No extra invariant beyond a valid
+# distribution: RUNNABLE may be uvx and may have no env_mapping.)
+RUNNABLE = "runnable"
 CATALOG = "catalog"
 VENDOR_LOCKED = "vendor-locked"
 OUT_OF_SCOPE = "out-of-scope"
 
-_STATUSES = frozenset({NATIVE, WIRED, CATALOG, VENDOR_LOCKED, OUT_OF_SCOPE})
+_STATUSES = frozenset({NATIVE, WIRED, RUNNABLE, CATALOG, VENDOR_LOCKED, OUT_OF_SCOPE})
 
 # Distribution kinds, mirroring the registry's ``distribution`` key.
 NPX = "npx"
@@ -110,6 +121,10 @@ class AcpAgent:
                 raise ValueError(f"{self.registry_id}: wired entry needs env_mapping")
             if self.distribution == NPX and not self.bin_name:
                 raise ValueError(f"{self.registry_id}: npx wired needs bin_name")
+        # RUNNABLE carries no extra invariant: the npx-or-binary / env_mapping
+        # contract is WIRED-only. A RUNNABLE entry may be uvx and may have no
+        # env_mapping (e.g. a local-model agent); a valid distribution (checked
+        # above) is all that is required.
 
 
 # ---------------------------------------------------------------------------
@@ -282,21 +297,37 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="acp",
-        status=CATALOG,
-        summary="DevOps agent; BYO-LLM custom OpenAI-compatible endpoint. The "
-        "one registry agent with a source-verified ACP session/set_model.",
+        status=WIRED,
+        summary="DevOps agent; BYO-LLM custom OpenAI-compatible endpoint, per-arch "
+        "Linux binary (`stakpak acp`).",
         api_protocol="openai-completions",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "OPENAI_MODEL",
+        },
         acp_model_format="provider/model",
-        supports_acp_set_model=True,
-        model_via="set_model",
-        reason="HARD-BLOCK on v0.3.88 (source-traced): the ACP path resolves "
-        "model->provider with a substring heuristic that only knows anthropic/"
-        "openai/google and falls through to 'stakpak' otherwise, so a custom "
-        "endpoint can't be routed via `stakpak acp` (the correct split resolver "
-        "exists only in the hosted-server path). It also advertises a VALIDATED "
-        "ACP model option backed by the static models.dev openai catalog. Config "
-        "schema (~/.stakpak/config.toml api_endpoint + provider-prefixed model) is "
-        "right, but won't route until upstream fixes acp/server.rs.",
+        supports_acp_set_model=False,
+        model_via="config-file",
+        bin_name="stakpak",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
+            "/v1/chat/completions, initialize+session/new OK — wired by "
+            "construction, no real-task reward claimed",
+        ),
+        known_issue="The ACP model->provider resolver is a substring heuristic "
+        "that only knows anthropic/openai/google (else falls through to the "
+        "hosted `stakpak` provider), and the ACP set_model path validates against "
+        "the static models.dev catalog — so the model is delivered out-of-band via "
+        "config, NOT over ACP (supports_acp_set_model=False).",
+        reason="Per-arch Linux binary (v0.3.88). UNBLOCKED: the launcher generates "
+        "a valid config via `stakpak auth login --provider openai --api-key K "
+        "--endpoint BASE` (writes ~/.stakpak/config.toml providers.openai."
+        "{api_endpoint,auth.key}), then forces the default-profile model to "
+        "`openai/<model>` so the substring resolver picks the openai provider + our "
+        "endpoint; state is isolated under HOME=$STAKPAK_BF_HOME and re-written from "
+        "env each launch. Verified wired-by-construction on the routing smoke "
+        "(wire model `openai/deepseek-v4-flash`).",
         source="https://github.com/stakpak/agent",
     ),
     AcpAgent(
@@ -374,10 +405,11 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         "OpenAI chat-completions host.",
         api_protocol="openai-completions",
         model_via="config-file",
-        reason="HARD-BLOCK (research): `kimi acp` is gated behind a mandatory "
-        "interactive OAuth login with no headless bypass, so it can't be wired "
-        "non-interactively. The config.toml [providers.<name>] type=openai_legacy "
-        "+ base_url + api_key schema is otherwise correct.",
+        reason="BLOCKED headless (smoke-confirmed): `kimi acp` mandates "
+        "interactive Kimi-account OAuth — session/new returns -32000 "
+        "'Authentication required' (authMethod login/terminal runs `kimi login`) "
+        "even with a complete openai_legacy provider config; `kimi login` is "
+        "OAuth-only with no api-key/token env bypass.",
         source="https://github.com/MoonshotAI/kimi-cli",
     ),
     AcpAgent(
@@ -510,7 +542,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=UVX,
         package="fast-agent-acp==0.7.18",
         acp_args="-x",
-        status=CATALOG,
+        status=RUNNABLE,
         summary="MCP-centric general agent framework; per-provider base_url "
         "overrides. A good 'not just coding' agent.",
         api_protocol="openai-completions",
@@ -521,13 +553,13 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
             "BENCHFLOW_PROVIDER_API_KEY": "OPENAI__API_KEY",
         },
         model_via="flag",
-        reason="Routing is smoke-verified (1 upstream /v1/chat/completions, "
-        "model=deepseek-v4-flash) via uvx, but it stays CATALOG only because "
-        "uvx-wired is out of this pass's npx-or-binary policy. Exact coords: PyPI "
-        "fast-agent-acp==0.7.18 (console script from its dep "
-        "fast-agent-mcp==0.7.18); reads pydantic nested env OPENAI__BASE_URL / "
-        "OPENAI__API_KEY (NOT plain OPENAI_BASE_URL) + --model openai.<id>; needs "
-        "a uv-managed CPython 3.13 bootstrap.",
+        reason="RUNNABLE: installs + launches headless via uvx (smoke: 1 upstream "
+        "/v1/chat/completions, model=deepseek-v4-flash, initialize+session/new "
+        "OK) — gateway-routable but uvx, outside the wired npx-or-binary policy, "
+        "so no wired claim. Coords: PyPI fast-agent-acp==0.7.18 (console script "
+        "from its dep fast-agent-mcp==0.7.18); reads pydantic nested env "
+        "OPENAI__BASE_URL / OPENAI__API_KEY (NOT plain OPENAI_BASE_URL) + --model "
+        "openai.<id>; needs a uv-managed CPython 3.13 bootstrap.",
         source="https://fast-agent.ai/ref/config_file/",
     ),
     AcpAgent(
@@ -538,15 +570,17 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="@autohandai/autohand-acp",
         acp_args="",
-        status=CATALOG,
+        status=RUNNABLE,
         summary="BYO agent; works with OpenRouter, OpenAI, Bedrock, DeepSeek, "
         "Z.ai, local models. Optional account is telemetry-only.",
         api_protocol="openai-completions",
         model_via="config-file",
-        reason="HARD-BLOCK (research): despite the BYO marketing, it is not "
-        "headless-configurable for an arbitrary endpoint+key+model — the ACP "
-        "adapter's config path can't be driven non-interactively to a custom "
-        "provider. Revisit if upstream adds a headless config.",
+        reason="RUNNABLE: installs + launches headless, ACP handshake OK (smoke: "
+        "initialize+session/new OK), but not gateway-enforced — despite the BYO "
+        "marketing (OpenRouter/OpenAI/Bedrock/DeepSeek/Z.ai/local), the ACP "
+        "adapter's config path can't be driven non-interactively to an arbitrary "
+        "endpoint+key+model, so model routing isn't gateway-controlled. Revisit if "
+        "upstream adds a headless config.",
         source="https://github.com/autohandai/code-cli",
     ),
     AcpAgent(
@@ -557,7 +591,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="@compass-ai/nova",
         acp_args="acp",
-        status=CATALOG,
+        status=RUNNABLE,
         summary="Agent built on @anthropic-ai/sdk; over ACP it serves only "
         "built-in Claude models (anthropic-messages), retargetable solely via "
         "COMPASS_ANTHROPIC_BASE_URL.",
@@ -568,15 +602,12 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         },
         bin_name="nova",
         model_via="env",
-        reason="npx (@compass-ai/nova), but NOT wireable to BenchFlow's "
-        "openai-completions gateway as-is — three source-read corrections: "
-        "(1) the standard ANTHROPIC_BASE_URL is IGNORED — nova's resolveBaseUrl "
-        "takes the Claude model-registry baseUrl (https://api.anthropic.com); the "
-        "ONLY env that retargets its anthropic provider is "
-        "COMPASS_ANTHROPIC_BASE_URL; (2) DEFAULT_OPENAI_BASE_URL is NOT an env "
-        "var, just an internal constant (the OpenAI base URL is not "
-        "env-overridable); (3) nova's ACP runtime is anthropic-messages ONLY and "
-        "exposes ONLY built-in Claude models over ACP, so it cannot serve the "
+        reason="RUNNABLE: installs + launches headless (smoke: initialize+session/"
+        "new OK) but routes to its own Claude-only backend — nova's ACP runtime is "
+        "anthropic-messages ONLY and exposes only built-in Claude models, "
+        "retargetable solely via COMPASS_ANTHROPIC_BASE_URL (the standard "
+        "ANTHROPIC_BASE_URL is ignored; DEFAULT_OPENAI_BASE_URL is an internal "
+        "constant, not env-overridable), so it cannot serve BenchFlow's "
         "openai-completions gateway / deepseek-v4-flash (smoke logged "
         "upstreamRequests=0 for the ACP turn). Usable only if the gateway exposes "
         "an anthropic-messages endpoint AND the run uses a Claude-family model id "
@@ -591,15 +622,17 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="cline",
         acp_args="--acp",
-        status=CATALOG,
+        status=RUNNABLE,
         summary="Popular coding agent; OpenAI-compatible routing exists but is "
         "currently fragile.",
         api_protocol="openai-completions",
         model_via="config-file",
-        reason="BYO via `cline auth --provider openai-native --baseurl ... "
-        "--modelid ...`, but multiple open issues report the custom base URL "
-        "being ignored (calls still hit api.openai.com). Wire only after "
-        "verifying requests actually reach the gateway.",
+        reason="RUNNABLE: installs + launches headless (smoke: initialize+session/"
+        "new OK) but model routing is not gateway-enforced — `cline auth "
+        "--provider openai-native --baseurl ... --modelid ...` exists, yet "
+        "multiple open issues report the custom base URL being ignored (calls "
+        "still hit api.openai.com), so faithful gateway routing is not claimed. "
+        "Promote to WIRED only after verifying requests actually reach the gateway.",
         source="https://github.com/cline/cline/blob/main/apps/cli/README.md",
     ),
     AcpAgent(
@@ -608,29 +641,35 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         license="proprietary",
         repository="https://github.com/github/copilot-cli",
         distribution=NPX,
-        package="@github/copilot",
-        acp_args="--acp --stdio",
-        status=CATALOG,
+        package="@github/copilot@1.0.65",
+        acp_args="--acp",
+        status=WIRED,
         summary="GitHub Copilot CLI; BYOK (own provider keys) is GA — NOT "
-        "backend-locked.",
+        "backend-locked. Built-in `--acp` server.",
         api_protocol="openai-completions",
         env_mapping={
             "BENCHFLOW_PROVIDER_BASE_URL": "COPILOT_PROVIDER_BASE_URL",
             "BENCHFLOW_PROVIDER_API_KEY": "COPILOT_PROVIDER_API_KEY",
             "BENCHFLOW_PROVIDER_MODEL": "COPILOT_MODEL",
         },
-        launch_env={"COPILOT_PROVIDER_TYPE": "openai"},
+        acp_model_format="bare",
         bin_name="copilot",
         model_via="env",
-        known_issue="PROBED on DeepSeek/Daytona with @github/copilot@1.0.61 + "
-        "COPILOT_PROVIDER_TYPE=openai + COPILOT_PROVIDER_BASE_URL/_API_KEY/"
-        "COPILOT_MODEL: session/new still fails with ACP -32000 'Authentication "
-        "required' — BYOK is NOT honored in ACP mode on this version (the npm "
-        "package also runtime-fetches a platform binary). Not usable until "
-        "BYOK-in-ACP works; revisit on a newer release.",
-        reason="BYO via COPILOT_PROVIDER_BASE_URL/_TYPE/_API_KEY + COPILOT_MODEL "
-        "(all env), and BYOK is GA — but the ACP path still demands GitHub auth "
-        "(see known_issue).",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
+            "/v1/chat/completions, initialize+session/new OK — wired by "
+            "construction, no real-task reward claimed",
+        ),
+        reason="npx (@github/copilot@1.0.65) via its built-in `--acp` server. "
+        "UNBLOCKED on 1.0.65 (resolves the prior 1.0.61 'Authentication required' "
+        "block): routes any OpenAI-compatible provider through the first-class "
+        "BYOK path purely via env (COPILOT_PROVIDER_TYPE=openai + "
+        "COPILOT_PROVIDER_BASE_URL/_API_KEY + COPILOT_MODEL, bare wire model). "
+        "Setting COPILOT_PROVIDER_BASE_URL makes the CLI use that provider instead "
+        "of GitHub's routing and, per `copilot help environment`, 'GitHub "
+        "authentication is not required' — so ACP launches fully headless with NO "
+        "GitHub token. (The npx launch path can't carry launch_env, so the "
+        "constant COPILOT_PROVIDER_TYPE=openai is exported by the agent launcher.)",
         source="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models",
     ),
     AcpAgent(
@@ -639,16 +678,37 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         license="proprietary",
         repository="https://www.codebuddy.ai",
         distribution=NPX,
-        package="@tencent-ai/codebuddy-code",
+        package="@tencent-ai/codebuddy-code@2.106.3",
         acp_args="--acp",
-        status=CATALOG,
-        summary="Tencent's coding agent; models.json supports fully custom "
-        "OpenAI-format models (the BYO escape hatch).",
+        status=WIRED,
+        summary="Tencent's coding agent (a Claude-Code fork); models.json supports "
+        "fully custom OpenAI-format models (the BYO escape hatch). `--acp`.",
         api_protocol="openai-completions",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "OPENAI_MODEL",
+        },
+        acp_model_format="bare",
         model_via="config-file",
-        reason="BYO via models.json url + apiKey (${ENV} refs), CODEBUDDY_API_KEY. "
-        "Default first run wants a Tencent login. Needs a config-file writer; "
-        "chat-completions only.",
+        bin_name="codebuddy",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 4 upstream "
+            "/v1/chat/completions, initialize+session/new OK — wired by "
+            "construction, no real-task reward claimed",
+        ),
+        known_issue="In the smoke, stopReason is null/promptTimeout because the "
+        "mock's canned reply does not satisfy CodeBuddy's internal topic-analyzer "
+        "turn loop (it keeps re-requesting); the ACP handshake + routing (4 "
+        "upstream calls, bare deepseek-v4-flash) are the anchor and passed.",
+        reason="npx (@tencent-ai/codebuddy-code). UNBLOCKED: `--acp` routes the CLI "
+        "into its headless bundle; the launcher writes a models.json custom model "
+        "(id tagged 'custom' → POSTs <url>/chat/completions with a BARE wire model; "
+        "url/apiKey go through CodeBuddy's own ${ENV} interpolation, default model "
+        "via CODEBUDDY_MODEL). Login bypass: a custom model + a dummy "
+        "CODEBUDDY_API_KEY skips the Tencent OAuth gate, so initialize+session/new "
+        "succeed headlessly. CODEBUDDY_CONFIG_DIR isolates state. chat-completions "
+        "only; model is config-owned (supports_acp_set_model=False).",
         source="https://www.codebuddy.ai/docs/cli/acp",
     ),
     AcpAgent(
@@ -657,18 +717,32 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         license="proprietary",
         repository="https://dim.qwenkimi.com",
         distribution=NPX,
-        package="dimcode",
+        package="dimcode@0.2.2",
         acp_args="acp",
-        status=CATALOG,
+        status=WIRED,
         summary="BYO agent ('OpenAI, Anthropic, or custom endpoint'; bring your "
-        "own model).",
+        "own model). npm wrapper that fetches a per-arch native binary; `dim acp`.",
+        api_protocol="openai-completions",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "OPENAI_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "OPENAI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "OPENAI_MODEL",
+        },
         model_via="config-file",
-        reason="BYO but configured INTERACTIVELY (run `dim`, then `/connect`), "
-        "persisted to ~/.dimcode/v2/dimcode.sqlite + credentials/ — there is no "
-        "`dim provider add` CLI and no providers.json, so non-interactive wiring "
-        "would have to seed a sqlite db. ACP launch is `dim acp`. Effectively not "
-        "cleanly wireable headless; per-provider wire protocol undocumented "
-        "(binary minified/closed).",
+        bin_name="dim",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
+            "/v1/chat/completions, initialize+session/new OK — wired by "
+            "construction, no real-task reward claimed",
+        ),
+        reason="npx (dimcode@0.2.2; the npm wrapper fetches a ~140MB per-arch "
+        "native binary). UNBLOCKED contrary to the old '/connect only' note: a "
+        "headless `dim provider add deepseek --api-key --base-url --model` CLI "
+        "persists the connection to ~/.dimcode/v2/dimcode.sqlite, so the launcher "
+        "runs it (reading OPENAI_BASE_URL/_API_KEY/_MODEL) before `dim acp`. The "
+        "`deepseek` provider uses the native openai-compatible driver (POSTs "
+        "base_url + /chat/completions, sends the model id BARE, accepts any "
+        "--model), so calls route through the gateway; the model is config-owned.",
         source="https://dim.qwenkimi.com/docs/acp",
     ),
     AcpAgent(
@@ -678,16 +752,35 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         repository="https://x.ai/cli",
         distribution=BINARY,
         package="",
-        acp_args="",
-        status=CATALOG,
+        acp_args="agent stdio",
+        status=WIRED,
         summary="xAI's Grok CLI; surprisingly BYO — GROK_MODELS_BASE_URL routes "
-        "all requests through a gateway (e.g. Vercel AI Gateway).",
+        "all chat traffic through an arbitrary OpenAI-completions gateway. "
+        "Per-arch Linux static-pie binary (`grok agent stdio`).",
         api_protocol="openai-completions",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "GROK_MODELS_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "XAI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "GROK_DEFAULT_MODEL",
+        },
         model_via="env",
-        reason="BYO via GROK_MODELS_BASE_URL + per-model config (base_url/env_key). "
-        "Held back: proprietary, access-gated (SuperGrok/Premium+), and "
-        "shell-installer-only (no public per-arch release page), though the "
-        "installer fetches both Linux arches.",
+        bin_name="grok",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 3 upstream "
+            "/v1/chat/completions, initialize+session/new OK — wired by "
+            "construction, no real-task reward claimed",
+        ),
+        known_issue="The wire model id is a FIXED literal 'grok-build' (the "
+        "agent's built-in coding model) regardless of GROK_DEFAULT_MODEL or ACP "
+        "set_model, so the benchmark model must be served/aliased as 'grok-build' "
+        "on the gateway (e.g. a LiteLLM alias). Access-gated for xAI's own backend "
+        "(SuperGrok/Premium+), but headless launch + handshake + gateway routing "
+        "need no account.",
+        reason="Per-arch Linux binary (v0.2.20). UNBLOCKED: GROK_MODELS_BASE_URL "
+        "routes all chat traffic through an arbitrary OpenAI-completions gateway "
+        "with no xAI OAuth — the launcher points it at the gateway, supplies "
+        "XAI_API_KEY, sets GROK_OAUTH_ENABLED=0, disables autoupdate/telemetry, and "
+        "isolates GROK_HOME under $HOME.",
         source="https://docs.x.ai/build",
     ),
     AcpAgent(
@@ -698,13 +791,16 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="--acp true",
-        status=CATALOG,
+        status=RUNNABLE,
         summary="JetBrains Junie CLI; 'the LLM-agnostic coding agent' — "
         "custom-model JSON profiles with arbitrary baseUrl.",
         api_protocol="openai-completions",
         model_via="config-file",
-        reason="BYO via $JUNIE_HOME/models/*.json (id/baseUrl/apiType/apiKey) + "
-        "--model custom:<id>. Needs a binary (shell-installer) + JSON writer. "
+        reason="RUNNABLE: installs + launches headless via the JetBrains "
+        "shell-installer binary (`--acp true`), ACP handshake OK (smoke: "
+        "initialize+session/new OK), but its BYO custom-model JSON "
+        "($JUNIE_HOME/models/*.json id/baseUrl/apiType/apiKey + --model "
+        "custom:<id>) is not wired here, so model routing is not gateway-enforced. "
         "Proprietary (JetBrains AI Service ToS).",
         source="https://junie.jetbrains.com/docs",
     ),
@@ -716,15 +812,17 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="acp",
-        status=CATALOG,
+        status=RUNNABLE,
         summary="Poolside 'pool' CLI; connects to any OpenAI-compatible chat "
         "completions API (incl. LiteLLM, OpenRouter, Ollama).",
         api_protocol="openai-completions",
         model_via="flag",
-        reason="HARD-BLOCK (research): although `pool exec --api-url` takes an "
-        "arbitrary OpenAI-compatible URL, the ACP server path can't be driven "
-        "headless to a custom endpoint (it advertises a validated model option and "
-        "routes through Poolside). Proprietary shell-installer binary.",
+        reason="RUNNABLE: installs + launches headless (smoke: initialize+session/"
+        "new OK) but the ACP server path can't be driven headless to a custom "
+        "endpoint — `pool exec --api-url` takes an arbitrary OpenAI-compatible "
+        "URL, yet the ACP path advertises a validated model option and routes "
+        "through Poolside, so model routing is not gateway-enforced. Proprietary "
+        "shell-installer binary.",
         source="https://docs.poolside.ai",
     ),
     AcpAgent(
@@ -735,11 +833,13 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=UVX,
         package="minion-code@0.1.44",
         acp_args="acp",
-        status=CATALOG,
+        status=RUNNABLE,
         summary="Python coding agent over ACP (uvx-distributed).",
         model_via="config-file",
-        reason="uvx-distributed (needs a uv bootstrap). BYO provider config "
-        "UNCONFIRMED from public docs — confirm before wiring. AGPL-3.0.",
+        reason="RUNNABLE: installs + launches headless via uvx (smoke: 2 upstream "
+        "/v1/chat/completions, initialize+session/new OK) — gateway-routable but "
+        "uvx, outside the wired npx-or-binary policy, so no wired claim. uvx "
+        "minion-code@0.1.44 (`acp`); needs a uv bootstrap. AGPL-3.0.",
         source="https://github.com/femto/minion-code",
     ),
     # === vendor-locked: cannot route through the gateway ==================
@@ -751,11 +851,13 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="",
-        status=VENDOR_LOCKED,
+        status=RUNNABLE,
         summary="Sourcegraph Amp over ACP.",
-        reason="Thin wrapper over Amp, a managed Sourcegraph service: AMP_API_KEY "
-        "only, no base-URL override, fixed curated model set (modes "
-        "smart/deep/rush). Cannot enforce the benchmark's model.",
+        reason="RUNNABLE: installs + launches headless, ACP handshake OK (smoke: "
+        "initialize+session/new OK), but routes to its vendor backend — a thin "
+        "wrapper over Amp (a managed Sourcegraph service): AMP_API_KEY only, no "
+        "base-URL override, fixed curated model set (modes smart/deep/rush), so "
+        "the benchmark's model can't be enforced through the gateway.",
         source="https://github.com/tao12345666333/amp-acp",
     ),
     AcpAgent(
@@ -766,11 +868,13 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="@augmentcode/auggie",
         acp_args="--acp",
-        status=VENDOR_LOCKED,
+        status=RUNNABLE,
         summary="Augment Code's CLI over ACP.",
-        reason="Requires an Augment account + `auggie login`. AUGMENT_API_URL "
-        "targets Augment tenants only; the LLM call is server-side. No BYO key "
-        "or base URL.",
+        reason="RUNNABLE: installs + launches headless and completes the ACP "
+        "handshake (smoke: initialize+session/new OK), but routes to its vendor "
+        "backend — needs an Augment account + `auggie login`; AUGMENT_API_URL "
+        "targets Augment tenants only and the LLM call is server-side, so there is "
+        "no BYO key/base URL and no gateway enforcement.",
         source="https://docs.augmentcode.com/cli/acp/clients",
     ),
     AcpAgent(
@@ -781,10 +885,12 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="",
-        status=VENDOR_LOCKED,
+        status=RUNNABLE,
         summary="Snowflake Cortex Code over ACP.",
-        reason="Requires a Snowflake account + CORTEX_USER role; models run "
-        "inside Snowflake Cortex. No BYO base URL.",
+        reason="RUNNABLE: installs + launches headless, ACP handshake OK (smoke: "
+        "initialize+session/new OK), but routes to its vendor backend — requires a "
+        "Snowflake account + CORTEX_USER role; models run inside Snowflake Cortex, "
+        "no BYO base URL, so no gateway enforcement.",
         source="https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code-cli",
     ),
     AcpAgent(
@@ -795,11 +901,13 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="",
-        status=VENDOR_LOCKED,
+        status=RUNNABLE,
         summary="Corust's fine-tuned Rust agent over ACP.",
-        reason="Runs Corust's own fine-tuned model through a Corust-hosted "
-        "gateway; no custom base URL or arbitrary model. Also ships no arm64 "
-        "Linux binary (x86_64 only) and is GPL-3.0.",
+        reason="RUNNABLE: installs + launches headless, ACP handshake OK (smoke: "
+        "initialize+session/new OK), but routes to its vendor backend — runs "
+        "Corust's own fine-tuned model through a Corust-hosted gateway, no custom "
+        "base URL or arbitrary model. Ships x86_64-only Linux binary (no arm64); "
+        "GPL-3.0.",
         source="https://github.com/Corust-ai/corust-agent-release",
     ),
     AcpAgent(
@@ -812,9 +920,10 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         acp_args="acp",
         status=VENDOR_LOCKED,
         summary="Cursor CLI (cursor-agent) over ACP.",
-        reason="Headless cursor-agent routes only through Cursor's backend "
-        "(requires a Cursor account). The app's custom-OpenAI-base-URL BYOK is "
-        "chat-models-only and does not reach the CLI.",
+        reason="BLOCKED headless (smoke-confirmed): session/new returns -32603 "
+        "'Failed to initialize session services' with a dummy CURSOR_API_KEY; the "
+        "only authenticate method is cursor_login (interactive browser OAuth), so "
+        "no ACP session can be created without a real Cursor account.",
         source="https://cursor.com/docs/cli",
     ),
     AcpAgent(
@@ -825,10 +934,12 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="droid",
         acp_args="exec --output-format acp-daemon",
-        status=VENDOR_LOCKED,
+        status=RUNNABLE,
         summary="Factory's Droid agent over ACP.",
-        reason="Requires a Factory account; model selection and the LLM call are "
-        "Factory-managed. No documented BYO base URL.",
+        reason="RUNNABLE: installs + launches headless, ACP handshake OK (smoke: "
+        "initialize+session/new OK), but routes to its vendor backend — requires a "
+        "Factory account; model selection and the LLM call are Factory-managed, no "
+        "documented BYO base URL, so no gateway enforcement.",
         source="https://docs.factory.ai",
     ),
     AcpAgent(
@@ -837,13 +948,35 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         license="Apache-2.0",
         repository="https://github.com/stefandevo/glm-acp-agent",
         distribution=NPX,
-        package="glm-acp-agent",
+        package="glm-acp-agent@1.1.4",
         acp_args="",
-        status=VENDOR_LOCKED,
-        summary="Z.AI GLM agent over ACP.",
-        reason="A base-URL var (ACP_GLM_BASE_URL) exists, but the README states "
-        "it is built for the Z.AI GLM Coding Plan and the endpoint rejects any "
-        "model Z.AI hasn't whitelisted — effectively locked to GLM models.",
+        status=WIRED,
+        summary="Z.AI GLM agent over ACP — OpenAI-Chat-Completions under the hood, "
+        "base URL fully overridable via ACP_GLM_BASE_URL.",
+        api_protocol="openai-completions",
+        env_mapping={
+            "BENCHFLOW_PROVIDER_BASE_URL": "ACP_GLM_BASE_URL",
+            "BENCHFLOW_PROVIDER_API_KEY": "Z_AI_API_KEY",
+            "BENCHFLOW_PROVIDER_MODEL": "ACP_GLM_MODEL",
+        },
+        acp_model_format="bare",
+        supports_acp_set_model=True,
+        model_via="env",
+        bin_name="glm-acp-agent",
+        verified=(
+            "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
+            "/v1/chat/completions, initialize+session/new OK — wired by "
+            "construction, no real-task reward claimed",
+        ),
+        reason="npx (glm-acp-agent@1.1.4; @agentclientprotocol/sdk + the OpenAI "
+        "SDK). UNBLOCKED contrary to the old VENDOR_LOCKED note: it is purely "
+        "OpenAI-Chat-Completions under the hood and its base URL is fully "
+        "overridable via ACP_GLM_BASE_URL, so pointing it at the gateway routes "
+        "ANY model unchanged (the key Z_AI_API_KEY is read lazily on first prompt, "
+        "so initialize+session/new handshake with no key). Model arrives via "
+        "ACP_GLM_MODEL env (session default) OR ACP set_model — unstable_"
+        "setSessionModel accepts arbitrary ids (warns 'not in advertised list; "
+        "using as-is') — sent bare on /v1/chat/completions.",
         source="https://github.com/stefandevo/glm-acp-agent",
     ),
     AcpAgent(
@@ -854,10 +987,12 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="@qoder-ai/qodercli",
         acp_args="--acp",
-        status=VENDOR_LOCKED,
+        status=RUNNABLE,
         summary="Qoder's coding CLI over ACP.",
-        reason="Auth only via `qodercli login` or a Qoder PAT; no arbitrary base "
-        "URL. Models are Qoder-managed.",
+        reason="RUNNABLE: installs + launches headless (smoke: initialize OK; "
+        "session/new did NOT return a sessionId), but routes to its vendor backend "
+        "— auth only via `qodercli login` or a Qoder PAT, no arbitrary base URL, "
+        "models are Qoder-managed, so no gateway enforcement.",
         source="https://docs.qoder.com/en/cli/sdk/authentication",
     ),
     AcpAgent(
@@ -868,11 +1003,13 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="",
-        status=VENDOR_LOCKED,
+        status=RUNNABLE,
         summary="Local-inference coding agent over ACP.",
-        reason="'Runs on your machine. No API keys. No cloud round-trips' — "
-        "downloads a local GGUF model (Onde Inference). No remote-provider "
-        "concept at all, so nothing to route through the gateway.",
+        reason="RUNNABLE: installs + launches headless (smoke: initialize+session/"
+        "new OK) but runs a LOCAL GGUF model (Onde Inference) — 'runs on your "
+        "machine, no API keys, no cloud round-trips', so there is no remote "
+        "provider to route through the gateway and the model is not "
+        "gateway-enforced.",
         source="https://github.com/getsigit/sigit",
     ),
     # === out-of-scope: not an LLM coding/eval agent =======================
