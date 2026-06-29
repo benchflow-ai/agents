@@ -127,7 +127,7 @@ pip install "omnigent-benchflow @ git+https://github.com/benchflow-ai/agents#sub
 Importing the package registers the `omnigent-*` agents with BenchFlow:
 
 ```python
-import omnigent  # registers omnigent-{pi,claude,codex,cursor,opencode,hermes,openai-agents}
+import omnigent  # registers all 22 omnigent-<harness> agents (omnigent-pi worked; rest listed)
 
 from benchflow import SDK
 # omnigent-pi is the fully-worked one (verified end-to-end).

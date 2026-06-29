@@ -13,16 +13,14 @@ additive.
 Status — only ``omnigent-pi`` is fully worked
 ---------------------------------------------
 ``omnigent-pi`` is verified end-to-end (install → connect → ``omnigent run`` →
-verifier; reward 1.0). The other harnesses (claude, codex, cursor, opencode,
-hermes, openai-agents) are **listed** so they appear in the registry the same
-way: omnigent itself is installed by the shared ``install_cmd`` and each agent is
-wired to its per-harness ``session_factory``. But each harness's OWN CLI install
-(the Claude Code / codex / cursor / opencode / hermes binary, or the OpenAI
-Agents SDK) and model routing are the NEXT step and are **not yet wired** — the
-shared ``install_cmd`` only provisions omnigent + node + uv + tmux (+ the
-harmless ``pi`` CLI). Do not assume a non-pi agent runs until its CLI is
-provisioned. The ``-native`` run-modes are documented in the README, not
-registered as separate agents.
+verifier; reward 1.0). The other 21 harnesses — every canonical ``--harness``
+value, including the ``*-native`` drivers — are **listed** so they appear in the
+registry the same way: omnigent itself is installed by the shared ``install_cmd``
+and each agent is wired to its per-harness ``session_factory``. But each
+harness's OWN CLI install (the vendor SDK/CLI, or omnigent's native driver) and
+model routing are the NEXT step and are **not yet wired** — the shared
+``install_cmd`` only provisions omnigent + node + uv + tmux (+ the harmless
+``pi`` CLI). Do not assume a non-pi agent runs until its CLI is provisioned.
 
 Requires the session-factory seam (see README "Requirements")
 -------------------------------------------------------------
@@ -102,13 +100,14 @@ logger = logging.getLogger(__name__)
 # confirm the published PyPI tag during live verification and update here.
 OMNIGENT_PIN = "0.1.0"
 
-# The Omnigent harnesses we list as BenchFlow agents — one entry per distinct
-# orchestrated agent, keyed by the canonical ``omnigent --harness`` value. The
-# official harness set is claude-sdk / claude-native / codex / codex-native /
-# cursor / cursor-native / hermes / hermes-native / opencode / pi / pi-native /
-# openai-agents (github.com/omnigent-ai/omnigent); the ``-native`` variants are
-# alternate run-modes of the same orchestrated agent, documented in the README
-# rather than registered as separate agents.
+# Every canonical Omnigent harness, derived from the upstream source of truth
+# (github.com/omnigent-ai/omnigent: omnigent/inner/*_harness.py + harness_aliases.py),
+# NOT omnigent's README (which lists only a subset). One BenchFlow agent per
+# canonical ``--harness`` value — 22 in all, including the ``*-native`` drivers.
+# Vendor-SDK/CLI harnesses drive the vendor's own agent; ``*-native`` are
+# omnigent's own native drivers (no vendor SDK). Only ``pi`` is fully worked
+# today; the rest are listed-not-wired (the harness's own CLI install + model
+# routing are the NEXT step).
 #
 # Each tuple is (slug, harness_value, cli_note):
 #   slug          — BenchFlow agent name suffix (``omnigent-<slug>``); the
@@ -116,21 +115,25 @@ OMNIGENT_PIN = "0.1.0"
 #   harness_value — the literal ``omnigent run --harness <value>`` argument.
 #   cli_note      — what the harness's OWN CLI/runtime still needs (NEXT step;
 #                   not yet wired for the non-pi harnesses).
-# Every canonical Omnigent harness, derived from the upstream source of truth
-# (github.com/omnigent-ai/omnigent: omnigent/inner/*_harness.py + harness_aliases.py),
-# NOT the README (which lists only a subset). One BenchFlow agent per canonical
-# `--harness` value: (slug -> agent name `omnigent-<slug>`; harness_value ->
-# `omnigent run --harness <value>`; cli_note -> what its install needs).
-# Vendor-SDK/CLI harnesses drive the vendor's own agent; `*-native` are omnigent's
-# own native drivers (no vendor SDK). Only `pi` is fully worked today; the rest are
-# listed-not-wired (the harness's own CLI install + model routing are the NEXT step).
 HARNESSES: list[tuple[str, str, str]] = [
-    ("pi", "pi", "fully worked — pi CLI (@earendil-works/pi-coding-agent) installed + model routing verified"),
+    (
+        "pi",
+        "pi",
+        "fully worked — pi CLI (@earendil-works/pi-coding-agent) installed + model routing verified",
+    ),
     # Vendor SDK / CLI harnesses (each needs its own CLI/SDK in-sandbox):
-    ("claude", "claude-sdk", "needs the Claude Code SDK (@anthropic-ai/claude-agent-sdk)"),
+    (
+        "claude",
+        "claude-sdk",
+        "needs the Claude Code SDK (@anthropic-ai/claude-agent-sdk)",
+    ),
     ("codex", "codex", "needs the Codex SDK (@openai/codex-sdk)"),
     ("cursor", "cursor", "needs the cursor CLI"),
-    ("opencode", "opencode-native", "needs the opencode binary (canonical `opencode-native`; `opencode` is its alias)"),
+    (
+        "opencode",
+        "opencode-native",
+        "needs the opencode binary (canonical `opencode-native`; `opencode` is its alias)",
+    ),
     ("hermes", "hermes", "needs the hermes CLI"),
     ("openai-agents", "openai-agents", "needs the OpenAI Agents SDK / python"),
     ("goose", "goose", "needs the goose binary (block/goose)"),
