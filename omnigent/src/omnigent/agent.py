@@ -153,7 +153,15 @@ class OmnigentAgent:
         ``omnigent run`` (executed as ``exec_user`` from ``OmnigentSession``)
         reads the resolved gateway routing with the literal API key.
         """
-        env = dict(agent_env or {})
+        # Core's session-factory runtime (SessionFactorySandbox) exposes the
+        # kernel-resolved per-role env on ``sandbox.agent_env`` and calls
+        # ``connect(sandbox, role)`` WITHOUT an ``agent_env`` kwarg; older core /
+        # direct construction pass it as the kwarg. Read the kwarg first, then
+        # the sandbox wrapper, so BOTH contracts work — without the wrapper
+        # fallback the provider routing (BENCHFLOW_PROVIDER_BASE_URL) and
+        # workspace (BENCHFLOW_AGENT_CWD) arrive empty (→ base_url-required
+        # config error and a /app fallback cwd that doesn't exist).
+        env = dict(agent_env or getattr(sandbox, "agent_env", None) or {})
 
         def _read(name: str) -> str:
             return env.get(name) or os.environ.get(name) or ""
