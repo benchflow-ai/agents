@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pkg: [acp, harness-pi, harness-codex, harness-claude-code]
+        pkg: [acp, harness-pi, harness-codex, harness-claude-code, harness-deepagents, harness-opencode]
     defaults:
       run:
         shell: bash -l {0}

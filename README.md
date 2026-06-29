@@ -44,8 +44,8 @@ each a top-level directory:
 | Path | How an agent adapts | Agents in it | Eval on BenchFlow |
 |---|---|---|---|
 | [**`acp/`**](acp/) · ACP over stdio | a declarative [`acp/<id>/manifest.toml`](acp/) (registry CLIs that already speak ACP — no code), or a self-contained ACP package | the **[36-agent ACP registry](acp-registry/)** (goose, Qwen Code, Stakpak, GitHub Copilot, GLM, …) + [**mini-swe**](acp/mini-swe-code/) (SWE-agent behind opencode's TUI) + [**mimo**](acp/mimo-acp/) (Xiaomi MiMo Code, native `mimo acp`) | registry: **13 wired · 14 runnable · 6 native** ([tiers](#tiers-how-faithfully-can-we-host-it) · [AGENTS.md](acp-registry/AGENTS.md)); mini-swe ✅ stable (>74% SWE-bench verified); mimo ✅ free `mimo-auto` runs headless |
-| [**`ai-sdk/`**](ai-sdk/) · Vercel AI SDK | a pure-JS `server.mjs` + `register.py` wrapping the AI SDK agent | `ToolLoopAgent` ([**acp**](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/), [mimo](ai-sdk/harness-mimo/)} | `acp` ✅ parity byte-verified · `harness-pi` ✅ (file tasks) · `codex`/`claude-code` 🧪 (need a Vercel sandbox) — [ai-sdk/README](ai-sdk/README.md) |
-| [**`omnigent/`**](omnigent/) · non-ACP Session | a `session_factory` that shells `omnigent run` inside the sandbox | [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents) `pi` meta-harness — the **only non-ACP** agent here | ✅ reward 1.0 on hello-world **and** the real `citation-check` task (DeepSeek/Daytona x86_64); needs the session-factory seam — [omnigent/README](omnigent/README.md) |
+| [**`ai-sdk/`**](ai-sdk/) · Vercel AI SDK | a pure-JS `server.mjs` + `register.py` wrapping the AI SDK agent | `ToolLoopAgent` ([**acp**](ai-sdk/acp/)) and `HarnessAgent` × {[pi](ai-sdk/harness-pi/), [codex](ai-sdk/harness-codex/), [claude-code](ai-sdk/harness-claude-code/), [mimo](ai-sdk/harness-mimo/), [deepagents](ai-sdk/harness-deepagents/), [opencode](ai-sdk/harness-opencode/)} — every official `@ai-sdk/harness-*` | `acp` ✅ parity byte-verified · `harness-pi` ✅ (file tasks) · `codex`/`claude-code` 🧪 (Vercel sandbox) · `deepagents`/`opencode` 🧪 scaffolded (routing next step) — [ai-sdk/README](ai-sdk/README.md) |
+| [**`omnigent/`**](omnigent/) · non-ACP Session | a per-harness `session_factory` that shells `omnigent run --harness <x>` in the sandbox | [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents) meta-harness — **7 harnesses** (`omnigent-pi`, `-claude`, `-codex`, `-cursor`, `-opencode`, `-hermes`, `-openai-agents`); the only non-ACP path | `omnigent-pi` ✅ reward 1.0 on hello-world **and** `citation-check`; the other 6 🧪 listed-not-wired (harness CLI install = next step); needs the session-factory seam — [omnigent/README](omnigent/README.md) |
 
 Within those paths an agent takes one of **two shapes**: a few **self-contained
 packages** (the `mini-swe-*` runtimes, the `ai-sdk/*` group, `omnigent`) — a
@@ -154,8 +154,8 @@ acp/              all ACP agents — 2 self-contained packages + 38 declarative 
   mini-swe-acp/       mini-swe-agent as a BenchFlow ACP agent
   <id>/manifest.toml  declarative registry agents (goose, qwen-code, …) + shims (mimo, …), no server code
 acp-registry/     classifies the 36 ACP-registry agents into 6 tiers (catalog.py → AGENTS.md)
-ai-sdk/           Vercel AI SDK agents: acp, harness-pi, harness-codex, harness-claude-code, harness-mimo
-omnigent/         Databricks Omnigent pi meta-harness as a non-ACP (session-factory) BenchFlow agent
+ai-sdk/           Vercel AI SDK agents: acp + harness-{pi,codex,claude-code,mimo,deepagents,opencode}
+omnigent/         Databricks Omnigent meta-harness: 7 non-ACP (session-factory) agents, one per --harness
 contract/         versioned manifest schema + loader + contract tests (validates acp/<id>/manifest.toml)
 skills/           adaptation-parity skill — adapt an agent + verify eval/prod parity
 docs/             adaptation.md, parity.md, tiers.md, CONTEXT.md, adr/ (0001–0003)

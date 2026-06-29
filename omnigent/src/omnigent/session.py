@@ -3,7 +3,8 @@
 The Agent plane is transport-agnostic (see ``benchflow.agents.protocol``): the
 kernel drives a rollout through the ``Session`` Protocol, and ACP is only the
 *first* concrete implementation. This module is a *second*: it drives one
-Databricks **Omnigent** ``pi``-harness run behind the same contract — by
+Databricks **Omnigent** run behind the same contract, against the **selected**
+harness (the ``--harness`` value wired in at construction; default ``pi``) — by
 shelling ``omnigent run`` **inside the BenchFlow sandbox** via
 :meth:`Sandbox.exec`, not by importing the ``omnigent-client`` SDK in-process.
 
@@ -16,10 +17,11 @@ observed to break at import time. The supported, isolated path is to install
 omnigent under its own ``uv tool`` environment **in the sandbox** (see
 ``register.py``) and invoke its one-shot CLI:
 
-    omnigent run --harness pi --model <MODEL> -p "<text>"
+    omnigent run --harness <HARNESS> --model <MODEL> -p "<text>"
 
-``-p`` is genuinely one-shot — it runs a single turn against the ``pi`` harness
-and exits (no REPL). The agent's file writes land in the sandbox workspace
+``-p`` is genuinely one-shot — it runs a single turn against the selected
+harness and exits (no REPL). The agent's file writes land in the sandbox
+workspace
 ``/app`` (the task cwd), exactly where BenchFlow's file-based verifier reads.
 Model routing + credentials are written into the sandbox at ``connect()`` time
 (``~/.omnigent/config.yaml``, built from ``agent_env``); see
@@ -128,12 +130,12 @@ def _final_agent_line(stdout: str) -> str:
 
 
 class OmnigentSession:
-    """A single Omnigent ``pi``-harness turn behind the ``Session`` contract.
+    """A single Omnigent harness turn behind the ``Session`` contract.
 
-    Drives ``omnigent run --harness pi -p <text>`` **inside the sandbox** via
-    :meth:`Sandbox.exec`. Construct via :meth:`OmnigentAgent.connect` — never
-    directly — so the sandbox handle, model, and credential config are wired in
-    one place.
+    Drives ``omnigent run --harness <harness> -p <text>`` **inside the sandbox**
+    via :meth:`Sandbox.exec`. Construct via :meth:`OmnigentAgent.connect` — never
+    directly — so the sandbox handle, model, harness, and credential config are
+    wired in one place.
     """
 
     def __init__(
@@ -142,10 +144,13 @@ class OmnigentSession:
         *,
         model: str | None,
         exec_user: str = "root",
+        harness: str = "pi",
     ) -> None:
         self._sandbox = sandbox
         self._model = model
         self._exec_user = exec_user
+        # Canonical ``omnigent --harness`` value baked into each per-turn run.
+        self._harness = harness
         self._ask_user_handler: AskUserHandler | None = None
         # Flat trajectory in the canonical on-disk event shape — see
         # benchflow.trajectories._capture._events_to_trajectory.
@@ -176,7 +181,8 @@ class OmnigentSession:
         cmd = (
             f"cd {shlex.quote(_WORKSPACE)} && "
             f"omnigent stop >/dev/null 2>&1; "
-            f"omnigent run --harness pi --model {shlex.quote(model)} "
+            f"omnigent run --harness {shlex.quote(self._harness)} "
+            f"--model {shlex.quote(model)} "
             f"-p {shlex.quote(text)}"
         )
 

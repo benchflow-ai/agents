@@ -1,12 +1,28 @@
-"""Register the non-ACP Databricks Omnigent ``pi`` agent with BenchFlow.
+"""Register the non-ACP Databricks Omnigent harnesses with BenchFlow.
 
 This is the out-of-core equivalent of an entry in benchflow's own
 ``agents/registry.py``, defined through the supported ``register_agent``
 extension point so the integration lives in this repo instead of the framework.
-Importing the package registers ``omnigent-pi`` with ``protocol="session-factory"``
-and a ``session_factory`` entrypoint that the kernel's non-ACP CONNECT branch
-resolves to :class:`omnigent.agent.OmnigentAgent`. ACP stays the default; this
-is purely additive.
+Importing the package registers one ``omnigent-<slug>`` agent per Omnigent
+``--harness`` value (see :data:`HARNESSES`), each with
+``protocol="session-factory"`` and a per-harness ``session_factory`` entrypoint
+that the kernel's non-ACP CONNECT branch resolves to
+:class:`omnigent.agent.OmnigentAgent`. ACP stays the default; this is purely
+additive.
+
+Status — only ``omnigent-pi`` is fully worked
+---------------------------------------------
+``omnigent-pi`` is verified end-to-end (install → connect → ``omnigent run`` →
+verifier; reward 1.0). The other harnesses (claude, codex, cursor, opencode,
+hermes, openai-agents) are **listed** so they appear in the registry the same
+way: omnigent itself is installed by the shared ``install_cmd`` and each agent is
+wired to its per-harness ``session_factory``. But each harness's OWN CLI install
+(the Claude Code / codex / cursor / opencode / hermes binary, or the OpenAI
+Agents SDK) and model routing are the NEXT step and are **not yet wired** — the
+shared ``install_cmd`` only provisions omnigent + node + uv + tmux (+ the
+harmless ``pi`` CLI). Do not assume a non-pi agent runs until its CLI is
+provisioned. The ``-native`` run-modes are documented in the README, not
+registered as separate agents.
 
 Requires the session-factory seam (see README "Requirements")
 -------------------------------------------------------------
@@ -86,10 +102,29 @@ logger = logging.getLogger(__name__)
 # confirm the published PyPI tag during live verification and update here.
 OMNIGENT_PIN = "0.1.0"
 
-# Dotted "module:callable" entrypoint resolved by the non-ACP CONNECT branch
-# (see benchflow.rollout: _resolve_session_factory). Must return an object
-# satisfying the Agent Protocol (connect/capabilities).
-OMNIGENT_SESSION_FACTORY = "omnigent.agent:build_omnigent_agent"
+# The Omnigent harnesses we list as BenchFlow agents — one entry per distinct
+# orchestrated agent, keyed by the canonical ``omnigent --harness`` value. The
+# official harness set is claude-sdk / claude-native / codex / codex-native /
+# cursor / cursor-native / hermes / hermes-native / opencode / pi / pi-native /
+# openai-agents (github.com/omnigent-ai/omnigent); the ``-native`` variants are
+# alternate run-modes of the same orchestrated agent, documented in the README
+# rather than registered as separate agents.
+#
+# Each tuple is (slug, harness_value, cli_note):
+#   slug          — BenchFlow agent name suffix (``omnigent-<slug>``); the
+#                   per-harness session_factory is build_omnigent_<slug_underscored>.
+#   harness_value — the literal ``omnigent run --harness <value>`` argument.
+#   cli_note      — what the harness's OWN CLI/runtime still needs (NEXT step;
+#                   not yet wired for the non-pi harnesses).
+HARNESSES: list[tuple[str, str, str]] = [
+    ("pi", "pi", "fully worked — pi CLI installed + model routing verified"),
+    ("claude", "claude-sdk", "needs the Claude Code CLI in-sandbox"),
+    ("codex", "codex", "needs the codex CLI"),
+    ("cursor", "cursor", "needs the cursor CLI"),
+    ("opencode", "opencode", "needs the opencode binary"),
+    ("hermes", "hermes", "needs the hermes CLI"),
+    ("openai-agents", "openai-agents", "needs the OpenAI Agents SDK / python"),
+]
 
 # npm package that provides the ``pi`` harness CLI binary.
 _PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
@@ -180,7 +215,7 @@ def _session_factory_seam_present() -> bool:
     Gating up front (rather than relying on ``register_agent`` to reject an
     unknown protocol) makes behaviour identical across versions: published
     BenchFlow does NOT validate ``protocol`` at registration time, so without
-    this gate it would silently register a non-functional ``omnigent-pi``.
+    this gate it would silently register non-functional ``omnigent-*`` agents.
     """
     try:
         from benchflow.agents.registry import VALID_PROTOCOLS
@@ -189,57 +224,88 @@ def _session_factory_seam_present() -> bool:
     return "session-factory" in VALID_PROTOCOLS
 
 
-def register():
-    """Register ``omnigent-pi``; idempotent (re-registration overwrites).
+# Identity passthrough shared by every harness: OmnigentAgent.connect reads
+# BENCHFLOW_PROVIDER_* directly from agent_env (and writes them into the
+# in-sandbox config.yaml), so no agent-native rename is needed. Keeping these in
+# env_mapping documents the contract and keeps the keys in agent_env.
+_ENV_MAPPING = {
+    "BENCHFLOW_PROVIDER_BASE_URL": "BENCHFLOW_PROVIDER_BASE_URL",
+    "BENCHFLOW_PROVIDER_API_KEY": "BENCHFLOW_PROVIDER_API_KEY",
+    "BENCHFLOW_PROVIDER_MODEL": "BENCHFLOW_PROVIDER_MODEL",
+}
 
-    Returns the created ``AgentConfig`` on success, or ``None`` when the
-    installed BenchFlow lacks the session-factory seam (logs a clear warning and
-    does NOT register, so importing the package is always safe and never leaves a
-    non-connectable agent behind).
+
+def _description_for(slug: str, value: str, cli_note: str) -> str:
+    """Per-agent description — honest about each harness's wiring status."""
+    if slug == "pi":
+        # The fully-worked one: install + pi CLI + model routing verified.
+        return (
+            "Databricks Omnigent `pi` harness, run INSIDE the BenchFlow "
+            "sandbox via the one-shot `omnigent run` CLI (non-ACP, "
+            "session-factory). Model + credentials are written into the "
+            "sandbox at connect() time from the resolved BenchFlow provider "
+            "routing."
+        )
+    return (
+        f"Databricks Omnigent `{value}` harness (`omnigent run --harness "
+        f"{value}`), run INSIDE the BenchFlow sandbox (non-ACP, "
+        f"session-factory). STATUS: listed — omnigent installed; the {value} "
+        f"harness's own CLI install + model routing are the NEXT step (not yet "
+        f"wired) — {cli_note}."
+    )
+
+
+def register():
+    """Register every Omnigent harness in :data:`HARNESSES`; idempotent.
+
+    One ``omnigent-<slug>`` agent per harness, each wired to its per-harness
+    ``session_factory`` (``omnigent.agent:build_omnigent_<slug>``). Re-running
+    overwrites by name. Returns the list of created ``AgentConfig`` objects on
+    success, or ``None`` when the installed BenchFlow lacks the session-factory
+    seam (logs a clear warning and registers NOTHING, so importing the package is
+    always safe and never leaves a non-connectable agent behind).
+
+    Only ``omnigent-pi`` is fully worked end-to-end; the rest are listed (see the
+    module docstring + each agent's ``description``) and still need their own CLI
+    install + model routing wired before they will run.
     """
     if not _session_factory_seam_present():
         logger.warning(
-            "omnigent-pi NOT registered: this BenchFlow build lacks the "
+            "omnigent harnesses NOT registered: this BenchFlow build lacks the "
             "session-factory seam. Install against a BenchFlow that has "
             "AgentConfig.session_factory + 'session-factory' in VALID_PROTOCOLS "
             "+ rollout._connect_session_factory. See the omnigent README."
         )
         return None
 
-    config = register_agent(
-        name="omnigent-pi",
-        description=(
-            "Databricks Omnigent `pi` harness, run INSIDE the BenchFlow "
-            "sandbox via the one-shot `omnigent run` CLI (non-ACP, "
-            "session-factory). Model + credentials are written into the "
-            "sandbox at connect() time from the resolved BenchFlow provider "
-            "routing."
-        ),
-        install_cmd=OMNIGENT_INSTALL_CMD,
-        # No ACP subprocess: the kernel uses the session_factory instead of
-        # launching + ACP-connecting. launch_cmd is kept descriptive only —
-        # the actual run is ``omnigent run`` shelled per turn by the session.
-        launch_cmd="omnigent run --harness pi",
-        protocol="session-factory",
-        # The benchmark model is forwarded per turn via ``omnigent run
-        # --model`` (read from BENCHFLOW_PROVIDER_MODEL by
-        # OmnigentAgent.connect); empty here lets --model /
-        # BENCHFLOW_PROVIDER_MODEL drive selection at runtime.
-        default_model="",
-        api_protocol="openai-completions",
-        # Identity passthrough: OmnigentAgent.connect reads BENCHFLOW_PROVIDER_*
-        # directly from agent_env (and writes them into the in-sandbox
-        # config.yaml), so no agent-native rename is needed. Keeping these in
-        # env_mapping documents the contract and keeps the keys in agent_env.
-        env_mapping={
-            "BENCHFLOW_PROVIDER_BASE_URL": "BENCHFLOW_PROVIDER_BASE_URL",
-            "BENCHFLOW_PROVIDER_API_KEY": "BENCHFLOW_PROVIDER_API_KEY",
-            "BENCHFLOW_PROVIDER_MODEL": "BENCHFLOW_PROVIDER_MODEL",
-        },
-        # Gateway URL/key resolved from the provider at runtime.
-        requires_env=[],
-    )
-    # Non-ACP field — set after construction so the core AgentConfig schema
-    # change stays minimal (one optional field; see benchflow registry.py).
-    config.session_factory = OMNIGENT_SESSION_FACTORY
-    return config
+    configs = []
+    for slug, value, cli_note in HARNESSES:
+        config = register_agent(
+            name=f"omnigent-{slug}",
+            description=_description_for(slug, value, cli_note),
+            # All non-pi harnesses REUSE the pi install_cmd: it installs omnigent
+            # itself + node + uv + tmux (the per-harness CLIs are the NEXT step;
+            # the bundled pi CLI step is harmless extra for them).
+            install_cmd=OMNIGENT_INSTALL_CMD,
+            # No ACP subprocess: the kernel uses the session_factory instead of
+            # launching + ACP-connecting. launch_cmd is kept descriptive only —
+            # the actual run is ``omnigent run`` shelled per turn by the session.
+            launch_cmd=f"omnigent run --harness {value}",
+            protocol="session-factory",
+            # The benchmark model is forwarded per turn via ``omnigent run
+            # --model`` (read from BENCHFLOW_PROVIDER_MODEL by
+            # OmnigentAgent.connect); empty here lets --model /
+            # BENCHFLOW_PROVIDER_MODEL drive selection at runtime.
+            default_model="",
+            api_protocol="openai-completions",
+            env_mapping=dict(_ENV_MAPPING),
+            # Gateway URL/key resolved from the provider at runtime.
+            requires_env=[],
+        )
+        # Non-ACP field — set after construction so the core AgentConfig schema
+        # change stays minimal (one optional field; see benchflow registry.py).
+        config.session_factory = (
+            f"omnigent.agent:build_omnigent_{slug.replace('-', '_')}"
+        )
+        configs.append(config)
+    return configs

@@ -1,14 +1,16 @@
 """``OmnigentAgent`` — the non-ACP :class:`~benchflow.agents.protocol.Agent` factory.
 
-Declared once in the registry (see :mod:`omnigent.register`) under
-``protocol="session-factory"`` and a ``session_factory`` entrypoint that
-resolves to :func:`build_omnigent_agent`. The kernel's non-ACP CONNECT branch
+Declared in the registry (one agent per harness; see :mod:`omnigent.register`)
+under ``protocol="session-factory"`` and per-harness ``session_factory``
+entrypoints — ``build_omnigent_<slug>`` (with :func:`build_omnigent_agent` kept
+as the default-``pi`` back-compat alias). The kernel's non-ACP CONNECT branch
 (``benchflow.rollout: _connect_session_factory``) calls
 :meth:`OmnigentAgent.connect` instead of ``connect_acp`` and wires the returned
 :class:`OmnigentSession` into the trajectory sink.
 
-The agent drives Databricks Omnigent's ``pi`` harness by shelling the one-shot
-``omnigent run`` CLI **inside the BenchFlow sandbox** (via :meth:`Sandbox.exec`)
+The agent drives the selected Databricks Omnigent harness (the ``--harness``
+value, default ``pi``) by shelling the one-shot ``omnigent run`` CLI **inside
+the BenchFlow sandbox** (via :meth:`Sandbox.exec`)
 — not by importing the conflicting ``omnigent-client`` SDK in the host process.
 ``connect`` runs **in-process on the host** but does all its real work in the
 sandbox: it writes Omnigent's credential store (``~/.omnigent/config.yaml``)
@@ -33,6 +35,7 @@ import base64
 import logging
 import os
 import shlex
+from collections.abc import Callable
 from typing import Any
 
 from benchflow.agents.protocol import AgentCapabilities
@@ -102,13 +105,17 @@ def _build_config_yaml(*, base_url: str, api_key: str, model: str) -> str:
 
 
 class OmnigentAgent:
-    """The Omnigent ``pi`` agent factory — implements the ``Agent`` Protocol."""
+    """The Omnigent agent factory (one per harness) — implements ``Agent``."""
 
-    def __init__(self, *, exec_user: str = "root") -> None:
+    def __init__(self, *, exec_user: str = "root", harness: str = "pi") -> None:
         # The sandbox user that ``omnigent run`` executes as. ``connect`` writes
         # the credential store under this user's home and the session execs as
         # this user, so the two stay in lockstep.
         self._exec_user = exec_user
+        # The canonical ``omnigent --harness`` value this agent drives (e.g.
+        # ``pi`` / ``claude-sdk`` / ``codex``). Forwarded to OmnigentSession,
+        # which bakes it into the per-turn ``omnigent run --harness <value>``.
+        self._harness = harness
 
     def capabilities(self) -> AgentCapabilities:
         """Declare the non-ACP protocol + multi-turn (nudge) support.
@@ -197,16 +204,61 @@ class OmnigentAgent:
             sandbox,
             model=model,
             exec_user=self._exec_user,
+            harness=self._harness,
         )
 
 
 def build_omnigent_agent(**kwargs: Any) -> OmnigentAgent:
-    """``session_factory`` entrypoint resolved by the non-ACP CONNECT branch.
+    """Back-compat ``session_factory`` entrypoint (defaults to the ``pi`` harness).
 
-    Referenced from the registry as the dotted path
-    ``omnigent.agent:build_omnigent_agent``. Accepts keyword overrides
-    (currently ``exec_user``) for tests and direct programmatic use; the
-    production path passes none and runs as ``root`` (the default sandbox exec
-    user, whose home is ``/root``).
+    Referenced historically from the registry as the dotted path
+    ``omnigent.agent:build_omnigent_agent``. Registration now wires each agent to
+    its per-harness factory (``build_omnigent_<slug>`` below); this generic alias
+    is kept for external callers. Accepts keyword overrides (currently
+    ``exec_user`` and ``harness``) for tests and direct programmatic use; the
+    production path passes none and runs the ``pi`` harness as ``root`` (the
+    default sandbox exec user, whose home is ``/root``).
     """
     return OmnigentAgent(**kwargs)
+
+
+# Per-harness ``session_factory`` entrypoints. Each is a MODULE-LEVEL global so a
+# dotted ``omnigent.agent:build_omnigent_<slug>`` path resolves — the registry
+# wires one per harness (see :data:`omnigent.register.HARNESSES`). The function
+# name uses underscores because hyphens aren't valid identifiers, so the
+# hyphenated ``openai-agents`` harness is reached via ``build_omnigent_openai_agents``.
+# slug → canonical ``omnigent --harness`` value:
+_HARNESS_VALUES: dict[str, str] = {
+    "pi": "pi",
+    "claude": "claude-sdk",
+    "codex": "codex",
+    "cursor": "cursor",
+    "opencode": "opencode",
+    "hermes": "hermes",
+    "openai_agents": "openai-agents",
+}
+
+
+def _make_harness_factory(harness_value: str) -> Callable[..., OmnigentAgent]:
+    """Build a ``session_factory`` callable bound to ``harness_value``."""
+
+    def factory(**kwargs: Any) -> OmnigentAgent:
+        return OmnigentAgent(harness=harness_value, **kwargs)
+
+    return factory
+
+
+for _slug, _value in _HARNESS_VALUES.items():
+    _name = f"build_omnigent_{_slug}"
+    _fn = _make_harness_factory(_value)
+    _fn.__name__ = _name
+    _fn.__qualname__ = _name
+    _fn.__doc__ = (
+        f"``session_factory`` entrypoint for the `{_value}` harness "
+        f"(omnigent-{_slug.replace('_', '-')}) — returns an OmnigentAgent bound "
+        f"to `omnigent run --harness {_value}`. Same keyword overrides as "
+        f"build_omnigent_agent (``exec_user``)."
+    )
+    globals()[_name] = _fn
+
+del _slug, _value, _name, _fn
