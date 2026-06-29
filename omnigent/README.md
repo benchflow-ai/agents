@@ -25,18 +25,44 @@ benchflow kernel ──session-factory──▶ OmnigentAgent.connect()         
 
 ## Harnesses
 
-One BenchFlow agent is registered per distinct orchestrated agent, named
-`omnigent-<slug>` and wired to `omnigent run --harness <value>`:
+One BenchFlow agent is registered per **canonical Omnigent harness**, named
+`omnigent-<slug>` and wired to `omnigent run --harness <value>`. The set is the
+**full** upstream list — derived from the source of truth
+([`omnigent/inner/*_harness.py`](https://github.com/omnigent-ai/omnigent/tree/main/omnigent/inner)
++ `harness_aliases.py`), **not** the shorter README example: **22 harnesses**, of
+which only `omnigent-pi` is fully worked today.
+
+**Vendor SDK / CLI harnesses** (drive the vendor's own agent; each needs its CLI/SDK in-sandbox):
 
 | BenchFlow agent | `--harness` value | status |
 | --- | --- | --- |
 | `omnigent-pi` | `pi` | **fully worked** — verified end-to-end (reward 1.0); `pi` CLI installed + model routing live |
-| `omnigent-claude` | `claude-sdk` | listed — needs the Claude Code CLI in-sandbox (NEXT step) |
-| `omnigent-codex` | `codex` | listed — needs the codex CLI (NEXT step) |
+| `omnigent-claude` | `claude-sdk` | listed — needs the Claude Code SDK (`@anthropic-ai/claude-agent-sdk`) (NEXT step) |
+| `omnigent-codex` | `codex` | listed — needs the Codex SDK (`@openai/codex-sdk`) (NEXT step) |
 | `omnigent-cursor` | `cursor` | listed — needs the cursor CLI (NEXT step) |
-| `omnigent-opencode` | `opencode` | listed — needs the opencode binary (NEXT step) |
+| `omnigent-opencode` | `opencode-native` | listed — needs the opencode binary (canonical `opencode-native`; `opencode` is its alias) (NEXT step) |
 | `omnigent-hermes` | `hermes` | listed — needs the hermes CLI (NEXT step) |
 | `omnigent-openai-agents` | `openai-agents` | listed — needs the OpenAI Agents SDK / python (NEXT step) |
+| `omnigent-goose` | `goose` | listed — needs the goose binary (block/goose) (NEXT step) |
+| `omnigent-qwen` | `qwen` | listed — needs the Qwen Code CLI (NEXT step) |
+| `omnigent-kimi` | `kimi` | listed — needs the Kimi CLI (NEXT step) |
+| `omnigent-copilot` | `copilot` | listed — needs the GitHub Copilot CLI (NEXT step) |
+| `omnigent-antigravity` | `antigravity` | listed — needs Google Antigravity (NEXT step) |
+
+**omnigent native drivers** (omnigent runs the agent directly, no vendor SDK):
+
+| BenchFlow agent | `--harness` value | status |
+| --- | --- | --- |
+| `omnigent-pi-native` | `pi-native` | listed — omnigent native pi driver (NEXT step) |
+| `omnigent-claude-native` | `claude-native` | listed — omnigent native Claude driver (NEXT step) |
+| `omnigent-codex-native` | `codex-native` | listed — omnigent native Codex driver (NEXT step) |
+| `omnigent-cursor-native` | `cursor-native` | listed — omnigent native Cursor driver (NEXT step) |
+| `omnigent-hermes-native` | `hermes-native` | listed — omnigent native Hermes driver (NEXT step) |
+| `omnigent-goose-native` | `goose-native` | listed — omnigent native goose driver (NEXT step) |
+| `omnigent-qwen-native` | `qwen-native` | listed — omnigent native Qwen driver (NEXT step) |
+| `omnigent-kimi-native` | `kimi-native` | listed — omnigent native Kimi driver (NEXT step) |
+| `omnigent-antigravity-native` | `antigravity-native` | listed — omnigent native Antigravity driver (NEXT step) |
+| `omnigent-kiro-native` | `kiro-native` | listed — Kiro (native-only harness) (NEXT step) |
 
 **Listed-not-wired** means: the agent appears in the registry, the shared
 `install_cmd` installs omnigent itself (+ node + uv + tmux, plus the harmless
@@ -47,16 +73,18 @@ factory is `omnigent.agent:build_omnigent_<slug>` (underscores in the function
 name, e.g. `build_omnigent_openai_agents`); `build_omnigent_agent` is kept as a
 back-compat alias that defaults to the `pi` harness.
 
-### `-native` run-modes
+### Completeness & provenance
 
-Omnigent's official `--harness` list also includes `-native` variants —
-`claude-native`, `codex-native`, `cursor-native`, `hermes-native`, `pi-native`
-(github.com/omnigent-ai/omnigent). These are **alternate run-modes of the same
-orchestrated agent** (omnigent's native driver instead of the vendor SDK/CLI
-path), not separate agents, so they are documented here rather than registered.
-To run one, point a session at it directly, e.g. `omnigent run --harness
-claude-native …`; if wired later it would be a run-mode toggle on the
-corresponding `omnigent-<slug>` agent, not a new registry entry.
+The 22 harnesses above are the **complete** canonical set, taken from the upstream
+source — every `omnigent/inner/*_harness.py` plus the alias map in
+`harness_aliases.py` — not the shorter list in omnigent's own README. The
+`*-native` rows are omnigent's native drivers (each a distinct harness in the
+source), now **registered** as their own `omnigent-<slug>-native` agents rather
+than left as run-mode notes. Aliases resolve to canonical values (e.g. `opencode`
+→ `opencode-native`, `claude` → `claude-sdk`, `qwen-code` → `qwen`), so we register
+the canonical `--harness` value for each. Re-run the source check if upstream adds a
+harness:
+`gh api repos/omnigent-ai/omnigent/git/trees/main?recursive=1 --jq '.tree[].path' | grep 'inner/.*_harness.py'`.
 
 Why in-sandbox subprocess and not the in-process `omnigent-client` SDK:
 Omnigent's runner pins `starlette<1` and ships a conflicting FastAPI/litellm
@@ -99,7 +127,7 @@ pip install "omnigent-benchflow @ git+https://github.com/benchflow-ai/agents#sub
 Importing the package registers the `omnigent-*` agents with BenchFlow:
 
 ```python
-import omnigent  # registers omnigent-{pi,claude,codex,cursor,opencode,hermes,openai-agents}
+import omnigent  # registers all 22 omnigent-<harness> agents (omnigent-pi worked; rest listed)
 
 from benchflow import SDK
 # omnigent-pi is the fully-worked one (verified end-to-end).
