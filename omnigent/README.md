@@ -1,24 +1,62 @@
 # omnigent
 
 [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents)
-as a [BenchFlow](https://github.com/benchflow-ai/benchflow) agent — the
-Omnigent `pi` meta-harness wired in through the public `benchflow.register_agent`
-extension point, maintained outside the core framework.
+as a [BenchFlow](https://github.com/benchflow-ai/benchflow) agent — the Omnigent
+meta-harness wired in through the public `benchflow.register_agent` extension
+point, maintained outside the core framework. The package lists **one BenchFlow
+agent per Omnigent `--harness`** (see [Harnesses](#harnesses)); only
+`omnigent-pi` is fully worked today, the rest are listed-not-wired (honest
+status below).
 
 Unlike the other agents in this repo, Omnigent does **not** speak ACP. It rides
-BenchFlow's non-ACP **Session** path: the kernel resolves a `session_factory`
-entrypoint and drives one `omnigent run --harness pi` turn per prompt, executed
-**inside the sandbox** via `Sandbox.exec`. ACP is the *first* concrete `Session`
-implementation; this is a *second*.
+BenchFlow's non-ACP **Session** path: the kernel resolves a per-harness
+`session_factory` entrypoint and drives one `omnigent run --harness <value>` turn
+per prompt, executed **inside the sandbox** via `Sandbox.exec`. ACP is the
+*first* concrete `Session` implementation; this is a *second*.
 
 ```text
 benchflow kernel ──session-factory──▶ OmnigentAgent.connect()         (host, in-process)
                                          └─ writes ~/.omnigent/config.yaml into sandbox
                  ──prompt(text)───────▶ OmnigentSession.prompt()       (host, in-process)
-                                         └─ sandbox.exec: `omnigent run --harness pi -p …`
-                                                              └─ omnigent server + pi runner
+                                         └─ sandbox.exec: `omnigent run --harness <value> -p …`
+                                                              └─ omnigent server + harness runner
                                                                    └─ writes files in /app
 ```
+
+## Harnesses
+
+One BenchFlow agent is registered per distinct orchestrated agent, named
+`omnigent-<slug>` and wired to `omnigent run --harness <value>`:
+
+| BenchFlow agent | `--harness` value | status |
+| --- | --- | --- |
+| `omnigent-pi` | `pi` | **fully worked** — verified end-to-end (reward 1.0); `pi` CLI installed + model routing live |
+| `omnigent-claude` | `claude-sdk` | listed — needs the Claude Code CLI in-sandbox (NEXT step) |
+| `omnigent-codex` | `codex` | listed — needs the codex CLI (NEXT step) |
+| `omnigent-cursor` | `cursor` | listed — needs the cursor CLI (NEXT step) |
+| `omnigent-opencode` | `opencode` | listed — needs the opencode binary (NEXT step) |
+| `omnigent-hermes` | `hermes` | listed — needs the hermes CLI (NEXT step) |
+| `omnigent-openai-agents` | `openai-agents` | listed — needs the OpenAI Agents SDK / python (NEXT step) |
+
+**Listed-not-wired** means: the agent appears in the registry, the shared
+`install_cmd` installs omnigent itself (+ node + uv + tmux, plus the harmless
+`pi` CLI), and the per-harness `session_factory` resolves — but each harness's
+**own** CLI install + model routing are the **NEXT step** and are not yet wired.
+Do not assume a non-pi agent runs until its CLI is provisioned. The per-harness
+factory is `omnigent.agent:build_omnigent_<slug>` (underscores in the function
+name, e.g. `build_omnigent_openai_agents`); `build_omnigent_agent` is kept as a
+back-compat alias that defaults to the `pi` harness.
+
+### `-native` run-modes
+
+Omnigent's official `--harness` list also includes `-native` variants —
+`claude-native`, `codex-native`, `cursor-native`, `hermes-native`, `pi-native`
+(github.com/omnigent-ai/omnigent). These are **alternate run-modes of the same
+orchestrated agent** (omnigent's native driver instead of the vendor SDK/CLI
+path), not separate agents, so they are documented here rather than registered.
+To run one, point a session at it directly, e.g. `omnigent run --harness
+claude-native …`; if wired later it would be a run-mode toggle on the
+corresponding `omnigent-<slug>` agent, not a new registry entry.
 
 Why in-sandbox subprocess and not the in-process `omnigent-client` SDK:
 Omnigent's runner pins `starlette<1` and ships a conflicting FastAPI/litellm
@@ -58,18 +96,19 @@ pip install "omnigent-benchflow @ git+https://github.com/benchflow-ai/agents#sub
 
 ## Usage
 
-Importing the package registers the agent with BenchFlow:
+Importing the package registers the `omnigent-*` agents with BenchFlow:
 
 ```python
-import omnigent  # registers omnigent-pi (non-ACP, session-factory)
+import omnigent  # registers omnigent-{pi,claude,codex,cursor,opencode,hermes,openai-agents}
 
 from benchflow import SDK
+# omnigent-pi is the fully-worked one (verified end-to-end).
 await SDK().run(task_path="...", agent="omnigent-pi", model="deepseek/deepseek-chat")
 ```
 
 Prefer no import side effects? Call `omnigent.register()` explicitly. It returns
-the `AgentConfig` on success, or `None` (with a warning) on a BenchFlow that
-lacks the session-factory seam.
+the **list** of created `AgentConfig` objects on success, or `None` (with a
+warning) on a BenchFlow that lacks the session-factory seam.
 
 The benchmark model is forwarded per turn via `omnigent run --model`
 (read from `BENCHFLOW_PROVIDER_MODEL`); credentials + gateway come from the
@@ -78,18 +117,22 @@ resolved `BENCHFLOW_PROVIDER_*` and are written into the in-sandbox
 
 ## How it works
 
-- `register.py` registers `omnigent-pi` with `protocol="session-factory"`, a
-  descriptive `launch_cmd`, and an `install_cmd` that provisions Omnigent +
-  the `pi` harness CLI inside the sandbox (see below). It sets
-  `session_factory = "omnigent.agent:build_omnigent_agent"`.
-- `agent.py` (`OmnigentAgent.connect`) writes Omnigent's credential store into
-  the sandbox at `~/.omnigent/config.yaml` — a single `gateway`-kind provider
-  pointing `pi` at the BenchFlow provider endpoint over the OpenAI `chat` wire,
-  with the **literal** API key (an env-ref does *not* resolve in the
-  daemon-spawned runner) and the base URL normalized to end with `/v1`.
+- `register.py` registers one `omnigent-<slug>` per entry in `HARNESSES`, each
+  with `protocol="session-factory"`, a descriptive per-harness `launch_cmd`, and
+  the shared `install_cmd` that provisions Omnigent + the `pi` harness CLI inside
+  the sandbox (see below). Each sets
+  `session_factory = "omnigent.agent:build_omnigent_<slug>"`.
+- `agent.py` (`OmnigentAgent.__init__(harness=...)` / `.connect`) writes
+  Omnigent's credential store into the sandbox at `~/.omnigent/config.yaml` — a
+  single `gateway`-kind provider pointing the harness at the BenchFlow provider
+  endpoint over the OpenAI `chat` wire, with the **literal** API key (an env-ref
+  does *not* resolve in the daemon-spawned runner) and the base URL normalized to
+  end with `/v1`. The per-harness factories `build_omnigent_<slug>` bind the
+  `--harness` value; `build_omnigent_agent` is the back-compat alias (defaults
+  `pi`).
 - `session.py` (`OmnigentSession.prompt`) shells one
-  `omnigent run --harness pi --model <model> -p <text>` per turn with cwd `/app`
-  (the task root), stopping any stale daemon first. It re-emits a
+  `omnigent run --harness <value> --model <model> -p <text>` per turn with cwd
+  `/app` (the task root), stopping any stale daemon first. It re-emits a
   `user_message` + final `agent_message` as trajectory events.
 
 The `install_cmd`, in the sandbox: isolated Node.js + **symlink `node`/`npm`/`npx`
@@ -108,6 +151,10 @@ install `uv`; `uv tool install omnigent` in its own venv (`--python 3.12`);
 > not block file writes.
 
 ## Verification
+
+Only `omnigent-pi` is verified — the other `omnigent-*` agents are listed but
+their own CLI install + model routing are not yet wired (see
+[Harnesses](#harnesses)), so they are unverified.
 
 `omnigent-pi` scores **reward 1.0** end-to-end in `bench eval` on a Daytona
 (x86_64) sandbox with `deepseek/deepseek-chat`, against a BenchFlow carrying the

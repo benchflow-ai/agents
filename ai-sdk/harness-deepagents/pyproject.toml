@@ -1,0 +1,42 @@
+[project]
+name = "ai-sdk-deepagents"
+version = "0.1.0"
+description = "Vercel AI SDK 7 HarnessAgent (DeepAgents harness) as a BenchFlow agent — pure-JS ACP server + registration"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+dependencies = [
+    # >=0.5.2 for the registry helpers (_NODE_INSTALL, _BENCHFLOW_NODE_PREFIX,
+    # AGENT_ALIASES). benchflow pins litellm to an rc — uv users: --prerelease=allow.
+    "benchflow>=0.5.2",
+]
+
+[project.urls]
+Repository = "https://github.com/benchflow-ai/agents"
+Documentation = "https://github.com/benchflow-ai/agents/tree/main/ai-sdk/harness-deepagents#readme"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.15",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_sdk_harness_deepagents"]
+
+# server.mjs is package data (read at register time + deployed into the sandbox).
+[tool.hatch.build.targets.wheel.force-include]
+"src/ai_sdk_harness_deepagents/server.mjs" = "ai_sdk_harness_deepagents/server.mjs"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+src = ["src", "tests"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ai_sdk_harness_deepagents"]
