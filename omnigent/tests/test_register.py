@@ -94,17 +94,36 @@ def test_run_timeout_backstop_is_generous() -> None:
 # ── Harness table + per-harness factories (no seam) ───────────────────────
 
 
-def test_harness_table_covers_the_distinct_orchestrated_agents() -> None:
-    """One entry per distinct orchestrated agent, canonical --harness value."""
+def test_harness_table_covers_all_canonical_harnesses() -> None:
+    """All 22 canonical Omnigent harnesses (upstream omnigent/inner/*_harness.py),
+    each mapped to its canonical ``--harness`` value (aliases resolved, e.g.
+    opencode→opencode-native, claude→claude-sdk)."""
     by_slug = {slug: value for slug, value, _note in HARNESSES}
     assert by_slug == {
+        # vendor SDK / CLI harnesses
         "pi": "pi",
         "claude": "claude-sdk",
         "codex": "codex",
         "cursor": "cursor",
-        "opencode": "opencode",
+        "opencode": "opencode-native",
         "hermes": "hermes",
         "openai-agents": "openai-agents",
+        "goose": "goose",
+        "qwen": "qwen",
+        "kimi": "kimi",
+        "copilot": "copilot",
+        "antigravity": "antigravity",
+        # omnigent native drivers
+        "pi-native": "pi-native",
+        "claude-native": "claude-native",
+        "codex-native": "codex-native",
+        "cursor-native": "cursor-native",
+        "hermes-native": "hermes-native",
+        "goose-native": "goose-native",
+        "qwen-native": "qwen-native",
+        "kimi-native": "kimi-native",
+        "antigravity-native": "antigravity-native",
+        "kiro-native": "kiro-native",
     }
 
 
