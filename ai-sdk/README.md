@@ -8,6 +8,15 @@ adapts + parity-checks them. ai-sdk is just one agent family — see
 [`../acp-registry/AGENTS.md`](../acp-registry/AGENTS.md) for the full registry
 across families.
 
+> **Official source.** The harness adapters are published from the
+> [vercel/ai monorepo](https://github.com/vercel/ai/tree/main/packages) as
+> `packages/harness-*`: `harness-pi`, `harness-codex`, `harness-claude-code`,
+> `harness-deepagents`, `harness-opencode`. This repo wraps **all five** (plus the
+> custom `harness-mimo`). The base [`@ai-sdk/harness`](https://www.npmjs.com/package/@ai-sdk/harness)
+> is the `HarnessAgent` abstraction itself, and `@ai-sdk/workflow-harness` runs a
+> `HarnessAgent` as a durable workflow — neither is a registerable coding agent, so
+> neither is listed here.
+
 | Package | AI SDK abstraction | Runs in BenchFlow? |
 |---|---|---|
 | [**acp**](acp/) | `ToolLoopAgent` (you program the loop) | ✅ yes — gateway-routed; **inside==outside parity byte-verified** |
