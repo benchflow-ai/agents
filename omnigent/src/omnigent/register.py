@@ -116,14 +116,39 @@ OMNIGENT_PIN = "0.1.0"
 #   harness_value — the literal ``omnigent run --harness <value>`` argument.
 #   cli_note      — what the harness's OWN CLI/runtime still needs (NEXT step;
 #                   not yet wired for the non-pi harnesses).
+# Every canonical Omnigent harness, derived from the upstream source of truth
+# (github.com/omnigent-ai/omnigent: omnigent/inner/*_harness.py + harness_aliases.py),
+# NOT the README (which lists only a subset). One BenchFlow agent per canonical
+# `--harness` value: (slug -> agent name `omnigent-<slug>`; harness_value ->
+# `omnigent run --harness <value>`; cli_note -> what its install needs).
+# Vendor-SDK/CLI harnesses drive the vendor's own agent; `*-native` are omnigent's
+# own native drivers (no vendor SDK). Only `pi` is fully worked today; the rest are
+# listed-not-wired (the harness's own CLI install + model routing are the NEXT step).
 HARNESSES: list[tuple[str, str, str]] = [
-    ("pi", "pi", "fully worked — pi CLI installed + model routing verified"),
-    ("claude", "claude-sdk", "needs the Claude Code CLI in-sandbox"),
-    ("codex", "codex", "needs the codex CLI"),
+    ("pi", "pi", "fully worked — pi CLI (@earendil-works/pi-coding-agent) installed + model routing verified"),
+    # Vendor SDK / CLI harnesses (each needs its own CLI/SDK in-sandbox):
+    ("claude", "claude-sdk", "needs the Claude Code SDK (@anthropic-ai/claude-agent-sdk)"),
+    ("codex", "codex", "needs the Codex SDK (@openai/codex-sdk)"),
     ("cursor", "cursor", "needs the cursor CLI"),
-    ("opencode", "opencode", "needs the opencode binary"),
+    ("opencode", "opencode-native", "needs the opencode binary (canonical `opencode-native`; `opencode` is its alias)"),
     ("hermes", "hermes", "needs the hermes CLI"),
     ("openai-agents", "openai-agents", "needs the OpenAI Agents SDK / python"),
+    ("goose", "goose", "needs the goose binary (block/goose)"),
+    ("qwen", "qwen", "needs the Qwen Code CLI"),
+    ("kimi", "kimi", "needs the Kimi CLI"),
+    ("copilot", "copilot", "needs the GitHub Copilot CLI"),
+    ("antigravity", "antigravity", "needs Google Antigravity"),
+    # omnigent native drivers (no vendor SDK — omnigent runs the agent directly):
+    ("pi-native", "pi-native", "omnigent native pi driver"),
+    ("claude-native", "claude-native", "omnigent native Claude driver"),
+    ("codex-native", "codex-native", "omnigent native Codex driver"),
+    ("cursor-native", "cursor-native", "omnigent native Cursor driver"),
+    ("hermes-native", "hermes-native", "omnigent native Hermes driver"),
+    ("goose-native", "goose-native", "omnigent native goose driver"),
+    ("qwen-native", "qwen-native", "omnigent native Qwen driver"),
+    ("kimi-native", "kimi-native", "omnigent native Kimi driver"),
+    ("antigravity-native", "antigravity-native", "omnigent native Antigravity driver"),
+    ("kiro-native", "kiro-native", "Kiro (native-only harness)"),
 ]
 
 # npm package that provides the ``pi`` harness CLI binary.

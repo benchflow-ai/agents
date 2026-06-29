@@ -6,10 +6,10 @@ registration assertions gate on the session-factory seam: on a benchflow whose
 ``VALID_PROTOCOLS`` lacks ``"session-factory"`` (e.g. published 0.6.x),
 ``register()`` returns ``None`` by design and those tests skip.
 
-Scope: the package now lists ALL Omnigent harnesses (``omnigent-pi`` plus
-``omnigent-{claude,codex,cursor,opencode,hermes,openai-agents}``). Only
-``omnigent-pi`` is fully worked; the rest are listed-not-wired (honest status in
-each ``description``).
+Scope: the package now lists ALL 22 canonical Omnigent harnesses (one
+``omnigent-<slug>`` per ``HARNESSES`` entry — the full upstream set incl. the
+``*-native`` drivers). Only ``omnigent-pi`` is fully worked; the rest are
+listed-not-wired (honest status in each ``description``).
 """
 
 import pytest
