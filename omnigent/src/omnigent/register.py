@@ -157,6 +157,46 @@ HARNESSES: list[tuple[str, str, str]] = [
 # npm package that provides the ``pi`` harness CLI binary.
 _PI_NPM_PACKAGE = "@earendil-works/pi-coding-agent"
 
+# Per-harness CLI provisioning. The shared OMNIGENT_INSTALL_CMD only installs
+# omnigent + node + uv + tmux (+ pi). Vendor harnesses additionally need their
+# OWN CLI on PATH; that CLI is then pointed at the BenchFlow provider gateway
+# (NOT a mounted subscription) by OmnigentAgent.connect, which writes the CLI's
+# provider config from the resolved BENCHFLOW_PROVIDER_* — the same gateway
+# routing codex-acp / claude-agent-acp use (so the harness runs the benchmark
+# model and its usage is captured by the proxy).
+#
+# install: an extra shell snippet appended to OMNIGENT_INSTALL_CMD (POSIX sh).
+_install_codex = (
+    "; "
+    # Pin codex 0.128.x: it still speaks the OpenAI ``chat`` wire API, which the
+    # BenchFlow provider gateway serves. codex >=0.14x is ``responses``-only and
+    # 500s against a chat-only gateway. 0.128 is the line codex-acp ships on
+    # (``@agentclientprotocol/codex-acp@0.0.45`` → ``@openai/codex@^0.128.0``).
+    f"{_BENCHFLOW_NODE_PREFIX}/bin/npm install -g '@openai/codex@~0.128.0'; "
+    f'CODEX_BIN="{_BENCHFLOW_NODE_PREFIX}/bin/codex"; '
+    'if [ ! -x "$CODEX_BIN" ]; then CODEX_BIN="$(command -v codex || true)"; fi; '
+    'if [ -n "$CODEX_BIN" ] && [ -x "$CODEX_BIN" ]; then ln -sf "$CODEX_BIN" /usr/local/bin/codex; fi; '
+    "which codex"
+)
+_install_claude = (
+    "; "
+    f"{_BENCHFLOW_NODE_PREFIX}/bin/npm install -g @anthropic-ai/claude-code; "
+    f'CLAUDE_BIN="{_BENCHFLOW_NODE_PREFIX}/bin/claude"; '
+    'if [ ! -x "$CLAUDE_BIN" ]; then CLAUDE_BIN="$(command -v claude || true)"; fi; '
+    'if [ -n "$CLAUDE_BIN" ] && [ -x "$CLAUDE_BIN" ]; then ln -sf "$CLAUDE_BIN" /usr/local/bin/claude; fi; '
+    "which claude"
+)
+
+# slug → extra install snippet. Harnesses absent here use the bare
+# OMNIGENT_INSTALL_CMD. Credential/gateway routing for these is written into the
+# vendor CLI's config by OmnigentAgent.connect (gateway path, no home_dirs mount).
+_HARNESS_SETUP: dict[str, str] = {
+    "codex": _install_codex,
+    "codex-native": _install_codex,
+    "claude": _install_claude,
+    "claude-native": _install_claude,
+}
+
 # Install the Omnigent CLI + harness INSIDE the sandbox. Idempotent and
 # POSIX-sh clean (the sandbox runs install_cmd under ``sh -c``; /bin/sh is dash
 # on Ubuntu — no bash-isms). Binaries are placed in /usr/local/bin so later
@@ -308,13 +348,15 @@ def register():
 
     configs = []
     for slug, value, cli_note in HARNESSES:
+        # Vendor harnesses append their own CLI install; their gateway routing is
+        # written into that CLI's config by connect(). Others use the bare install.
+        extra_install = _HARNESS_SETUP.get(slug, "")
         config = register_agent(
             name=f"omnigent-{slug}",
             description=_description_for(slug, value, cli_note),
-            # All non-pi harnesses REUSE the pi install_cmd: it installs omnigent
-            # itself + node + uv + tmux (the per-harness CLIs are the NEXT step;
-            # the bundled pi CLI step is harmless extra for them).
-            install_cmd=OMNIGENT_INSTALL_CMD,
+            # Shared omnigent install (omnigent + node + uv + tmux + pi) plus, for
+            # vendor harnesses, that harness's OWN CLI (codex/claude/...).
+            install_cmd=OMNIGENT_INSTALL_CMD + extra_install,
             # No ACP subprocess: the kernel uses the session_factory instead of
             # launching + ACP-connecting. launch_cmd is kept descriptive only —
             # the actual run is ``omnigent run`` shelled per turn by the session.

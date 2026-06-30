@@ -43,6 +43,12 @@ from omnigent.session import OmnigentSession
 
 logger = logging.getLogger(__name__)
 
+# Harness ``--harness`` values that drive their OWN vendor CLI. connect() points
+# that CLI at the BenchFlow provider gateway (writes its provider config / sets
+# its env). Keep in sync with ``register._HARNESS_SETUP``.
+_CODEX_HARNESSES = frozenset({"codex", "codex-native"})
+_CLAUDE_HARNESSES = frozenset({"claude-sdk", "claude-native"})
+
 
 def _home_for_user(user: str) -> str:
     """Return the home directory for the sandbox exec user.
@@ -160,14 +166,27 @@ class OmnigentAgent:
         ``omnigent run`` (executed as ``exec_user`` from ``OmnigentSession``)
         reads the resolved gateway routing with the literal API key.
         """
-        env = dict(agent_env or {})
+        # SessionFactorySandbox (bf-net pub/main) exposes the per-role env on
+        # ``sandbox.agent_env`` and calls connect() WITHOUT an agent_env kwarg;
+        # older core / direct construction pass it as the kwarg. Read the kwarg
+        # first, then the sandbox wrapper, so BOTH contracts work — else the
+        # provider routing + BENCHFLOW_AGENT_CWD arrive empty (base_url-required
+        # error + a /app fallback cwd that does not exist).
+        env = dict(agent_env or getattr(sandbox, "agent_env", None) or {})
 
         def _read(name: str) -> str:
             return env.get(name) or os.environ.get(name) or ""
 
         model = _read("BENCHFLOW_PROVIDER_MODEL")
-        base_url = _normalize_base_url(_read("BENCHFLOW_PROVIDER_BASE_URL"))
+        raw_base_url = _read("BENCHFLOW_PROVIDER_BASE_URL")
+        base_url = _normalize_base_url(raw_base_url)
         api_key = _read("BENCHFLOW_PROVIDER_API_KEY")
+        # The kernel mints BENCHFLOW_AGENT_CWD = the resolved per-rollout
+        # workspace (the same dir ACP agents run in and the verifier reads). Run
+        # `omnigent run` there instead of a hardcoded path so the harness behaves
+        # like any other benchflow-hosted agent. Falls back to the session
+        # default when the kernel did not resolve a cwd (older core / unit tests).
+        agent_cwd = _read("BENCHFLOW_AGENT_CWD") or None
 
         config_yaml = _build_config_yaml(
             base_url=base_url, api_key=api_key, model=model
@@ -200,11 +219,74 @@ class OmnigentAgent:
             self._exec_user,
         )
 
+        # Vendor-CLI harnesses ride the BenchFlow gateway via their OWN CLI's
+        # provider config. ``harness_env`` carries any env the CLI needs at run
+        # time (e.g. the gateway key codex reads via ``env_key``); the session
+        # exports it before ``omnigent run``.
+        harness_env: dict[str, str] = {}
+        if self._harness in _CODEX_HARNESSES:
+            # codex is ``responses``-only (the ``chat`` wire was removed in 0.12x).
+            # Point it at the gateway with a custom provider on the ``responses``
+            # wire: the gateway's litellm proxy serves /v1/responses and bridges
+            # to the chat backend. The model MUST be the bare id — codex can't
+            # parse a ``provider/model`` slash (it then sends no request), and the
+            # gateway registers the stripped name too. The key is read from the
+            # OPENAI_API_KEY env (env_key), exported by the session.
+            bare_model = model.rsplit("/", 1)[-1] if model else ""
+            codex_toml = (
+                (f'model = "{bare_model}"\n' if bare_model else "")
+                + 'model_provider = "benchflow"\n\n'
+                + "[model_providers.benchflow]\n"
+                + 'name = "benchflow"\n'
+                + f'base_url = "{base_url}"\n'
+                + 'env_key = "OPENAI_API_KEY"\n'
+                + 'wire_api = "responses"\n'
+                # The gateway (litellm) serves HTTP /v1/responses but not the
+                # responses *websocket*; without this codex hangs retrying the ws
+                # upgrade and never falls back to HTTP (0 requests). Force HTTP.
+                + "supports_websockets = false\n"
+            )
+            codex_dir = f"{home}/.codex"
+            toml_b64 = base64.b64encode(codex_toml.encode("utf-8")).decode("ascii")
+            await sandbox.exec(
+                f"mkdir -p {shlex.quote(codex_dir)} && "
+                f"printf %s {shlex.quote(toml_b64)} | base64 -d > {shlex.quote(codex_dir + '/config.toml')}",
+                user=self._exec_user,
+                timeout_sec=30,
+            )
+            harness_env["OPENAI_API_KEY"] = api_key
+            # Pin CODEX_HOME so codex reads the config we just wrote regardless of
+            # the HOME omnigent's runner spawns it under.
+            harness_env["CODEX_HOME"] = codex_dir
+        elif self._harness in _CLAUDE_HARNESSES:
+            # The Claude Code CLI is env-configured: point it at the BenchFlow
+            # gateway's Anthropic-messages route (same ANTHROPIC_* mapping
+            # claude-agent-acp uses). The gateway serves /v1/messages (unlike the
+            # /responses route codex needs), so the model alias routes fine.
+            # ANTHROPIC_BASE_URL must be the ROOT — the Anthropic client appends
+            # ``/v1/messages`` itself, so strip the resolved base's trailing /v1
+            # (else the client hits /v1/v1/messages → 404).
+            anthropic_base = raw_base_url.rstrip("/")
+            if anthropic_base.endswith("/v1"):
+                anthropic_base = anthropic_base[:-3].rstrip("/")
+            harness_env["ANTHROPIC_BASE_URL"] = anthropic_base
+            harness_env["ANTHROPIC_AUTH_TOKEN"] = api_key
+            if model:
+                harness_env["ANTHROPIC_MODEL"] = model
+
+        # Codex selects its model from the config.toml we wrote (and rejects a
+        # ``provider/model`` slug on the CLI), so omit ``--model`` for it. pi and
+        # claude DO take the benchmark model on ``omnigent run --model`` (claude
+        # otherwise falls back to its built-in default, which the gateway rejects).
+        session_model = "" if self._harness in _CODEX_HARNESSES else model
+
         return OmnigentSession(
             sandbox,
-            model=model,
+            model=session_model,
             exec_user=self._exec_user,
             harness=self._harness,
+            cwd=agent_cwd,
+            harness_env=harness_env,
         )
 
 
