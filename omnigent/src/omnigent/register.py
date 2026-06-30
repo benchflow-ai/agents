@@ -10,17 +10,20 @@ that the kernel's non-ACP CONNECT branch resolves to
 :class:`omnigent.agent.OmnigentAgent`. ACP stays the default; this is purely
 additive.
 
-Status — only ``omnigent-pi`` is fully worked
----------------------------------------------
-``omnigent-pi`` is verified end-to-end (install → connect → ``omnigent run`` →
-verifier; reward 1.0). The other 21 harnesses — every canonical ``--harness``
-value, including the ``*-native`` drivers — are **listed** so they appear in the
-registry the same way: omnigent itself is installed by the shared ``install_cmd``
-and each agent is wired to its per-harness ``session_factory``. But each
-harness's OWN CLI install (the vendor SDK/CLI, or omnigent's native driver) and
-model routing are the NEXT step and are **not yet wired** — the shared
-``install_cmd`` only provisions omnigent + node + uv + tmux (+ the harmless
-``pi`` CLI). Do not assume a non-pi agent runs until its CLI is provisioned.
+Status — per-harness (see :data:`_HARNESS_STATUS`)
+--------------------------------------------------
+``omnigent-pi`` and ``omnigent-claude`` are **verified end-to-end** on the
+BenchFlow provider gateway (install → connect → ``omnigent run`` → verifier;
+citation-check reward 1.0). ``pi`` rides the gateway ``/v1/chat/completions``
+route; ``claude`` (the Claude Code CLI) rides ``/v1/messages``. ``omnigent-codex``
+/ ``-codex-native`` are wired (codex CLI + a responses-wire provider config) but
+**blocked**: codex is responses-only and the gateway's ``/v1/responses`` route
+404s the model (a benchflow-core/litellm matter). The remaining harnesses are
+**listed**: the per-harness ``session_factory`` resolves and omnigent is
+installed, but only the canonical 0.1.0 ``--harness`` values
+(:data:`_REAL_OMNIGENT_HARNESSES`) actually launch — the rest are upstream-only
+and rejected as "Unsupported harness". Do not assume a listed harness runs until
+its row says WORKED.
 
 Requires the session-factory seam (see README "Requirements")
 -------------------------------------------------------------
@@ -125,9 +128,27 @@ HARNESSES: list[tuple[str, str, str]] = [
     (
         "claude",
         "claude-sdk",
-        "needs the Claude Code SDK (@anthropic-ai/claude-agent-sdk)",
+        "WORKED — Claude Code CLI (@anthropic-ai/claude-code) installed; routes "
+        "via the gateway Anthropic /v1/messages with ANTHROPIC_BASE_URL/_AUTH_"
+        "TOKEN/_MODEL (reward 1.0)",
     ),
-    ("codex", "codex", "needs the Codex SDK (@openai/codex-sdk)"),
+    (
+        "codex",
+        "codex",
+        "codex is responses-only; the gateway /v1/responses route 404s the model "
+        "(needs a benchflow-core litellm fix to register it on that route)",
+    ),
+    # Real omnigent-0.1.0 harnesses the upstream-derived list above omits:
+    (
+        "open-responses",
+        "open-responses",
+        "real omnigent 0.1.0 harness; gateway /v1/responses routing (NEXT step)",
+    ),
+    (
+        "databricks-supervisor",
+        "databricks_supervisor",
+        "real omnigent 0.1.0 harness; omnigent's own supervisor (NEXT step)",
+    ),
     ("cursor", "cursor", "needs the cursor CLI"),
     (
         "opencode",
@@ -143,8 +164,17 @@ HARNESSES: list[tuple[str, str, str]] = [
     ("antigravity", "antigravity", "needs Google Antigravity"),
     # omnigent native drivers (no vendor SDK — omnigent runs the agent directly):
     ("pi-native", "pi-native", "omnigent native pi driver"),
-    ("claude-native", "claude-native", "omnigent native Claude driver"),
-    ("codex-native", "codex-native", "omnigent native Codex driver"),
+    (
+        "claude-native",
+        "claude-native",
+        "Claude Code CLI + gateway ANTHROPIC_* env wired; the native driver "
+        "launches but does not yet surface a scoreable run",
+    ),
+    (
+        "codex-native",
+        "codex-native",
+        "same gateway /v1/responses limitation as `codex`",
+    ),
     ("cursor-native", "cursor-native", "omnigent native Cursor driver"),
     ("hermes-native", "hermes-native", "omnigent native Hermes driver"),
     ("goose-native", "goose-native", "omnigent native goose driver"),
@@ -303,24 +333,54 @@ _ENV_MAPPING = {
 }
 
 
+# The ``--harness`` values omnigent 0.1.0 actually exposes (``omnigent run``
+# rejects anything else as "Unsupported harness"). The rest of HARNESSES is the
+# fuller upstream list, kept forward-looking but flagged as not-in-pinned.
+_REAL_OMNIGENT_HARNESSES = frozenset(
+    {
+        "claude-native",
+        "claude-sdk",
+        "codex",
+        "codex-native",
+        "databricks_supervisor",
+        "open-responses",
+        "openai-agents",
+        "pi",
+    }
+)
+
+# Per-harness wiring status, verified on the BenchFlow deepseek-v4-flash gateway.
+# Update as harnesses get wired/verified.
+_HARNESS_STATUS: dict[str, str] = {
+    "pi": "worked",  # gateway /v1/chat/completions; reward 1.0
+    "claude": "worked",  # gateway /v1/messages; reward 1.0
+    "codex": "blocked",  # gateway /v1/responses 404s the model
+    "codex-native": "blocked",
+    "claude-native": "wip",  # native driver launches, no scoreable run yet
+}
+
+
 def _description_for(slug: str, value: str, cli_note: str) -> str:
     """Per-agent description — honest about each harness's wiring status."""
-    if slug == "pi":
-        # The fully-worked one: install + pi CLI + model routing verified.
-        return (
-            "Databricks Omnigent `pi` harness, run INSIDE the BenchFlow "
-            "sandbox via the one-shot `omnigent run` CLI (non-ACP, "
-            "session-factory). Model + credentials are written into the "
-            "sandbox at connect() time from the resolved BenchFlow provider "
-            "routing."
-        )
-    return (
+    base = (
         f"Databricks Omnigent `{value}` harness (`omnigent run --harness "
-        f"{value}`), run INSIDE the BenchFlow sandbox (non-ACP, "
-        f"session-factory). STATUS: listed — omnigent installed; the {value} "
-        f"harness's own CLI install + model routing are the NEXT step (not yet "
-        f"wired) — {cli_note}."
+        f"{value}`), run INSIDE the BenchFlow sandbox via the one-shot "
+        f"`omnigent run` CLI (non-ACP, session-factory)."
     )
+    status = _HARNESS_STATUS.get(slug)
+    if status == "worked":
+        return f"{base} STATUS: WORKED end-to-end on the BenchFlow provider gateway (citation-check reward 1.0) — {cli_note}."
+    if status == "blocked":
+        return f"{base} STATUS: wired but BLOCKED — {cli_note}."
+    if status == "wip":
+        return f"{base} STATUS: wired (WIP) — {cli_note}."
+    if value not in _REAL_OMNIGENT_HARNESSES:
+        return (
+            f"{base} STATUS: listed (upstream-only — NOT a `--harness` value in "
+            f"the pinned omnigent {OMNIGENT_PIN}; rejected as 'Unsupported "
+            f"harness'); {cli_note}."
+        )
+    return f"{base} STATUS: listed — real omnigent harness, not yet wired; {cli_note}."
 
 
 def register():
