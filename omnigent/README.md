@@ -4,9 +4,11 @@
 as a [BenchFlow](https://github.com/benchflow-ai/benchflow) agent — the Omnigent
 meta-harness wired in through the public `benchflow.register_agent` extension
 point, maintained outside the core framework. The package lists **one BenchFlow
-agent per Omnigent `--harness`** (see [Harnesses](#harnesses)); only
-`omnigent-pi` is fully worked today, the rest are listed-not-wired (honest
-status below).
+agent per Omnigent `--harness`** (see [Harnesses](#harnesses)). **`omnigent-pi`
+and `omnigent-claude` are verified end-to-end on the BenchFlow provider gateway
+(citation-check reward 1.0, docker + daytona)**; `omnigent-codex` is wired but
+blocked upstream (the gateway's `/v1/responses` route); the rest are listed with
+honest per-harness status below.
 
 Unlike the other agents in this repo, Omnigent does **not** speak ACP. It rides
 BenchFlow's non-ACP **Session** path: the kernel resolves a per-harness
@@ -26,64 +28,77 @@ benchflow kernel ──session-factory──▶ OmnigentAgent.connect()         
 ## Harnesses
 
 One BenchFlow agent is registered per **canonical Omnigent harness**, named
-`omnigent-<slug>` and wired to `omnigent run --harness <value>`. The set is the
-**full** upstream list — derived from the source of truth
+`omnigent-<slug>` and wired to `omnigent run --harness <value>`. The list keeps
+the **full** upstream set — derived from the source of truth
 ([`omnigent/inner/*_harness.py`](https://github.com/omnigent-ai/omnigent/tree/main/omnigent/inner)
-+ `harness_aliases.py`), **not** the shorter README example: **22 harnesses**, of
-which only `omnigent-pi` is fully worked today.
++ `harness_aliases.py`) — but **only the 8 values omnigent 0.1.0 actually exposes
+launch** (`pi`, `claude-sdk`, `claude-native`, `codex`, `codex-native`,
+`openai-agents`, `open-responses`, `databricks_supervisor`); the rest are
+upstream-only and rejected as "Unsupported harness" by the pinned omnigent.
+Status is tracked per harness in `register._HARNESS_STATUS` — update it as
+harnesses get wired.
 
-**Vendor SDK / CLI harnesses** (drive the vendor's own agent; each needs its CLI/SDK in-sandbox):
+Status legend: **WORKED** (verified e2e, reward 1.0) · **blocked** (wired,
+upstream/gateway gap) · **WIP** (wired, no scoreable run yet) · **listed** (real
+0.1.0 harness, not yet wired) · **upstream-only** (not a 0.1.0 `--harness`).
+
+**Vendor SDK / CLI harnesses** (drive the vendor's own CLI, pointed at the BenchFlow gateway):
 
 | BenchFlow agent | `--harness` value | status |
 | --- | --- | --- |
-| `omnigent-pi` | `pi` | **fully worked** — verified end-to-end (reward 1.0); `pi` CLI installed + model routing live |
-| `omnigent-claude` | `claude-sdk` | listed — needs the Claude Code SDK (`@anthropic-ai/claude-agent-sdk`) (NEXT step) |
-| `omnigent-codex` | `codex` | listed — needs the Codex SDK (`@openai/codex-sdk`) (NEXT step) |
-| `omnigent-cursor` | `cursor` | listed — needs the cursor CLI (NEXT step) |
-| `omnigent-opencode` | `opencode-native` | listed — needs the opencode binary (canonical `opencode-native`; `opencode` is its alias) (NEXT step) |
-| `omnigent-hermes` | `hermes` | listed — needs the hermes CLI (NEXT step) |
-| `omnigent-openai-agents` | `openai-agents` | listed — needs the OpenAI Agents SDK / python (NEXT step) |
-| `omnigent-goose` | `goose` | listed — needs the goose binary (block/goose) (NEXT step) |
-| `omnigent-qwen` | `qwen` | listed — needs the Qwen Code CLI (NEXT step) |
-| `omnigent-kimi` | `kimi` | listed — needs the Kimi CLI (NEXT step) |
-| `omnigent-copilot` | `copilot` | listed — needs the GitHub Copilot CLI (NEXT step) |
-| `omnigent-antigravity` | `antigravity` | listed — needs Google Antigravity (NEXT step) |
+| `omnigent-pi` | `pi` | **WORKED** — verified e2e (reward 1.0); `pi` CLI + gateway `/v1/chat/completions` |
+| `omnigent-claude` | `claude-sdk` | **WORKED** — verified e2e (reward 1.0); Claude Code CLI (`@anthropic-ai/claude-code`) + gateway `/v1/messages` (`ANTHROPIC_BASE_URL`/`_AUTH_TOKEN`/`_MODEL`) |
+| `omnigent-codex` | `codex` | **blocked** — codex CLI (pinned `@openai/codex@~0.128`) + responses-wire provider config wired, but codex is responses-only and the gateway `/v1/responses` route 404s the model (needs a benchflow-core litellm fix) |
+| `omnigent-openai-agents` | `openai-agents` | listed — real 0.1.0 harness; needs the OpenAI Agents SDK / responses routing (NEXT step) |
+| `omnigent-open-responses` | `open-responses` | listed — real 0.1.0 harness; gateway `/v1/responses` routing (NEXT step) |
+| `omnigent-databricks-supervisor` | `databricks_supervisor` | listed — real 0.1.0 harness; omnigent's own supervisor (NEXT step) |
+| `omnigent-cursor` | `cursor` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-opencode` | `opencode-native` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-hermes` | `hermes` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-goose` | `goose` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-qwen` | `qwen` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-kimi` | `kimi` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-copilot` | `copilot` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-antigravity` | `antigravity` | upstream-only — not in omnigent 0.1.0 |
 
 **omnigent native drivers** (omnigent runs the agent directly, no vendor SDK):
 
 | BenchFlow agent | `--harness` value | status |
 | --- | --- | --- |
-| `omnigent-pi-native` | `pi-native` | listed — omnigent native pi driver (NEXT step) |
-| `omnigent-claude-native` | `claude-native` | listed — omnigent native Claude driver (NEXT step) |
-| `omnigent-codex-native` | `codex-native` | listed — omnigent native Codex driver (NEXT step) |
-| `omnigent-cursor-native` | `cursor-native` | listed — omnigent native Cursor driver (NEXT step) |
-| `omnigent-hermes-native` | `hermes-native` | listed — omnigent native Hermes driver (NEXT step) |
-| `omnigent-goose-native` | `goose-native` | listed — omnigent native goose driver (NEXT step) |
-| `omnigent-qwen-native` | `qwen-native` | listed — omnigent native Qwen driver (NEXT step) |
-| `omnigent-kimi-native` | `kimi-native` | listed — omnigent native Kimi driver (NEXT step) |
-| `omnigent-antigravity-native` | `antigravity-native` | listed — omnigent native Antigravity driver (NEXT step) |
-| `omnigent-kiro-native` | `kiro-native` | listed — Kiro (native-only harness) (NEXT step) |
+| `omnigent-claude-native` | `claude-native` | **WIP** — Claude Code CLI + gateway `ANTHROPIC_*` wired; the native driver launches but does not yet surface a scoreable run |
+| `omnigent-codex-native` | `codex-native` | **blocked** — same gateway `/v1/responses` limitation as `codex` |
+| `omnigent-pi-native` | `pi-native` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-cursor-native` | `cursor-native` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-hermes-native` | `hermes-native` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-goose-native` | `goose-native` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-qwen-native` | `qwen-native` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-kimi-native` | `kimi-native` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-antigravity-native` | `antigravity-native` | upstream-only — not in omnigent 0.1.0 |
+| `omnigent-kiro-native` | `kiro-native` | upstream-only — not in omnigent 0.1.0 |
 
-**Listed-not-wired** means: the agent appears in the registry, the shared
-`install_cmd` installs omnigent itself (+ node + uv + tmux, plus the harmless
-`pi` CLI), and the per-harness `session_factory` resolves — but each harness's
-**own** CLI install + model routing are the **NEXT step** and are not yet wired.
-Do not assume a non-pi agent runs until its CLI is provisioned. The per-harness
-factory is `omnigent.agent:build_omnigent_<slug>` (underscores in the function
-name, e.g. `build_omnigent_openai_agents`); `build_omnigent_agent` is kept as a
-back-compat alias that defaults to the `pi` harness.
+**How a vendor harness rides the gateway:** `OmnigentAgent.connect` installs the
+harness's own CLI (via the per-harness `register._HARNESS_SETUP` install snippet)
+and points it at the resolved BenchFlow provider gateway — codex via a
+`~/.codex/config.toml` custom provider on the OpenAI `responses` wire, claude via
+`ANTHROPIC_BASE_URL`/`_AUTH_TOKEN`/`_MODEL` env (root base url, the client appends
+`/v1/messages`). The per-harness factory is
+`omnigent.agent:build_omnigent_<slug>` (underscores; e.g.
+`build_omnigent_openai_agents`); `build_omnigent_agent` is a back-compat alias
+defaulting to `pi`. **upstream-only** rows are kept forward-looking but the pinned
+omnigent rejects them — do not assume a harness runs until its row says WORKED.
 
 ### Completeness & provenance
 
-The 22 harnesses above are the **complete** canonical set, taken from the upstream
-source — every `omnigent/inner/*_harness.py` plus the alias map in
-`harness_aliases.py` — not the shorter list in omnigent's own README. The
-`*-native` rows are omnigent's native drivers (each a distinct harness in the
-source), now **registered** as their own `omnigent-<slug>-native` agents rather
-than left as run-mode notes. Aliases resolve to canonical values (e.g. `opencode`
-→ `opencode-native`, `claude` → `claude-sdk`, `qwen-code` → `qwen`), so we register
-the canonical `--harness` value for each. Re-run the source check if upstream adds a
-harness:
+The harnesses above keep the **full** upstream canonical set (every
+`omnigent/inner/*_harness.py` + the `harness_aliases.py` map) so new ones surface
+in the registry, **plus** the two real 0.1.0 harnesses that the upstream-file
+scan misses (`open-responses`, `databricks_supervisor`). Only the 8 values
+omnigent 0.1.0 exposes actually launch (`register._REAL_OMNIGENT_HARNESSES`); the
+upstream-only rows are forward-looking and rejected by the pinned omnigent until a
+newer omnigent ships them. Aliases resolve to canonical values (e.g. `opencode` →
+`opencode-native`, `claude` → `claude-sdk`, `qwen-code` → `qwen`), so we register
+the canonical `--harness` value for each. Re-check the live harness set with
+`omnigent run --harness x` (the error lists the supported values), or the source:
 `gh api repos/omnigent-ai/omnigent/git/trees/main?recursive=1 --jq '.tree[].path' | grep 'inner/.*_harness.py'`.
 
 Why in-sandbox subprocess and not the in-process `omnigent-client` SDK:
@@ -127,11 +142,11 @@ pip install "omnigent-benchflow @ git+https://github.com/benchflow-ai/agents#sub
 Importing the package registers the `omnigent-*` agents with BenchFlow:
 
 ```python
-import omnigent  # registers all 22 omnigent-<harness> agents (omnigent-pi worked; rest listed)
+import omnigent  # registers the omnigent-<harness> agents (pi + claude verified; see Harnesses)
 
 from benchflow import SDK
-# omnigent-pi is the fully-worked one (verified end-to-end).
-await SDK().run(task_path="...", agent="omnigent-pi", model="deepseek/deepseek-chat")
+# omnigent-pi and omnigent-claude are verified end-to-end (reward 1.0).
+await SDK().run(task_path="...", agent="omnigent-claude", model="deepseek/deepseek-v4-flash")
 ```
 
 Prefer no import side effects? Call `omnigent.register()` explicitly. It returns
@@ -152,10 +167,16 @@ resolved `BENCHFLOW_PROVIDER_*` and are written into the in-sandbox
   `session_factory = "omnigent.agent:build_omnigent_<slug>"`.
 - `agent.py` (`OmnigentAgent.__init__(harness=...)` / `.connect`) writes
   Omnigent's credential store into the sandbox at `~/.omnigent/config.yaml` — a
-  single `gateway`-kind provider pointing the harness at the BenchFlow provider
-  endpoint over the OpenAI `chat` wire, with the **literal** API key (an env-ref
-  does *not* resolve in the daemon-spawned runner) and the base URL normalized to
-  end with `/v1`. The per-harness factories `build_omnigent_<slug>` bind the
+  single `gateway`-kind provider pointing the `pi` harness at the BenchFlow
+  provider endpoint over the OpenAI `chat` wire, with the **literal** API key (an
+  env-ref does *not* resolve in the daemon-spawned runner) and the base URL
+  normalized to end with `/v1`. **Vendor-CLI harnesses** additionally get their
+  own CLI pointed at the gateway: codex via a `~/.codex/config.toml` custom
+  provider on the `responses` wire (`supports_websockets=false`), claude via
+  `ANTHROPIC_BASE_URL`/`_AUTH_TOKEN`/`_MODEL` env (the resolved base with its
+  trailing `/v1` stripped, since the Anthropic client appends `/v1/messages`).
+  It also plumbs `BENCHFLOW_AGENT_CWD` so the run lands in the verifier's
+  workspace. The per-harness factories `build_omnigent_<slug>` bind the
   `--harness` value; `build_omnigent_agent` is the back-compat alias (defaults
   `pi`).
 - `session.py` (`OmnigentSession.prompt`) shells one
@@ -180,23 +201,31 @@ install `uv`; `uv tool install omnigent` in its own venv (`--python 3.12`);
 
 ## Verification
 
-Only `omnigent-pi` is verified — the other `omnigent-*` agents are listed but
-their own CLI install + model routing are not yet wired (see
-[Harnesses](#harnesses)), so they are unverified.
+`omnigent-pi` and `omnigent-claude` are verified **end-to-end** in `bench eval`
+on **citation-check** (a real research task: read a BibTeX file, query citation
+APIs over the network, detect the hallucinated entries, write sorted JSON) with
+`deepseek/deepseek-v4-flash` through the BenchFlow provider gateway:
 
-`omnigent-pi` scores **reward 1.0** end-to-end in `bench eval` on a Daytona
-(x86_64) sandbox with `deepseek/deepseek-chat`, against a BenchFlow carrying the
-session-factory seam (validated on the 0.7 line, `trajectory_source="session"`):
+| agent | docker | daytona | route |
+| --- | --- | --- | --- |
+| `omnigent-pi` | reward **1.0** | reward 0.0¹ | gateway `/v1/chat/completions` |
+| `omnigent-claude` | reward **1.0** | reward **1.0** | gateway `/v1/messages` |
 
-- **hello-world** (toy file-write) — full pipeline green: install → connect →
-  `omnigent run` → verifier.
-- **citation-check** (real, medium research task) — read a BibTeX file, query
-  citation APIs over the network, detect the hallucinated entries, write sorted
-  JSON. All 9 verifier tests passed (all three fake citations detected, correct
-  count, clean titles).
+¹ pi/daytona ran through with real activity (253k tokens, no error) but the model
+missed the answer on that attempt — stochastic, not a harness failure. The
+connect/session path has no docker/daytona branch, so behaviour is sandbox-agnostic.
 
-Both runs used the default (`auto`) usage tracking so omnigent routed through
-the proxy; see Requirements on why `usage_tracking="off"` nulls the reward.
+All four runs route through the proxy and capture the **raw `llm_trajectory.jsonl`**
+(real model round-trips) alongside `acp_trajectory.jsonl`. They use the default
+(`auto`) usage tracking; see Requirements on why `usage_tracking="off"` nulls the
+reward. `omnigent-codex` is wired but blocked upstream (see [Harnesses](#harnesses)).
+
+> The `benchflow-experiment-review` validator marks every omnigent run
+> `unhealthy` for the **same** reason — *"missing or zero tool usage metadata"*
+> (`n_tool_calls=0`) — uniformly across pi/claude × docker/daytona. That is the
+> coarse-trajectory limitation below (omnigent's one-shot `-p` mode surfaces no
+> per-tool-call stream), **not** a routing gap: the reward and the raw
+> `llm_trajectory` are real.
 
 Known limitation — coarse trajectories: the stdout-parsing adapter emits only
 the prompt + final agent message, so per-tool-call granularity is absent
