@@ -146,16 +146,12 @@ class OmnigentSession:
         exec_user: str = "root",
         harness: str = "pi",
         cwd: str | None = None,
-        harness_env: dict[str, str] | None = None,
     ) -> None:
         self._sandbox = sandbox
         self._model = model
         self._exec_user = exec_user
         # Canonical ``omnigent --harness`` value baked into each per-turn run.
         self._harness = harness
-        # Extra env exported before ``omnigent run`` for the selected harness's
-        # own CLI (e.g. the gateway key codex reads via ``env_key``). Empty for pi.
-        self._harness_env = harness_env or {}
         # Where ``omnigent run`` executes. The kernel resolves the per-rollout
         # workspace and plumbs it through (BENCHFLOW_AGENT_CWD → OmnigentAgent →
         # here); falls back to ``_WORKSPACE`` when unset so direct construction /
@@ -188,18 +184,11 @@ class OmnigentSession:
         # stale per-harness server left by a prior turn. ``omnigent run`` is the
         # one-shot turn (``-p`` exits after a single turn, no REPL). cwd is the
         # kernel-resolved workspace so output files land where the verifier reads.
-        # ``--model`` is only passed when set: pi and claude drive the benchmark
-        # model on the CLI, but codex reads its model from the config.toml we
-        # wrote (and rejects a ``provider/model`` slug on the flag), so connect()
-        # passes an empty model for codex and we omit the flag entirely.
+        # ``--model`` (the benchmark model) is forwarded when set; omnigent's
+        # runner routes every harness through the config.yaml gateway provider
+        # written at connect() time, so no per-harness env is needed here.
         model_flag = f"--model {shlex.quote(model)} " if model else ""
-        # Export any harness-specific env (e.g. codex's OPENAI_API_KEY) in the
-        # same shell so the omnigent-spawned CLI inherits it.
-        env_prefix = "".join(
-            f"export {k}={shlex.quote(v)}; " for k, v in self._harness_env.items()
-        )
         cmd = (
-            f"{env_prefix}"
             f"cd {shlex.quote(self._cwd)} && "
             f"omnigent stop >/dev/null 2>&1; "
             f"omnigent run --harness {shlex.quote(self._harness)} "

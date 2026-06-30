@@ -43,11 +43,16 @@ from omnigent.session import OmnigentSession
 
 logger = logging.getLogger(__name__)
 
-# Harness ``--harness`` values that drive their OWN vendor CLI. connect() points
-# that CLI at the BenchFlow provider gateway (writes its provider config / sets
-# its env). Keep in sync with ``register._HARNESS_SETUP``.
-_CODEX_HARNESSES = frozenset({"codex", "codex-native"})
-_CLAUDE_HARNESSES = frozenset({"claude-sdk", "claude-native"})
+# The BenchFlow gateway (a LiteLLM proxy) serves the OpenAI ``chat`` wire
+# (``/v1/chat/completions``) and the Anthropic ``messages`` wire
+# (``/v1/messages``). connect() writes ONE ``~/.omnigent/config.yaml`` gateway
+# provider carrying both the ``openai`` and ``anthropic`` families; omnigent's
+# own runner then maps each harness to its family and emits the per-harness
+# ``HARNESS_*_GATEWAY_*`` env vars itself (pi → both families;
+# claude-sdk/-native → anthropic; codex/-native + openai-agents → openai, with
+# ``wire_api: chat`` so codex uses chat completions, not the Responses API). The
+# adaptor does NOT re-implement that routing — it only translates the resolved
+# ``BENCHFLOW_PROVIDER_*`` into the provider block.
 
 
 def _home_for_user(user: str) -> str:
@@ -78,18 +83,36 @@ def _normalize_base_url(base_url: str) -> str:
     return f"{url}/v1"
 
 
+def _anthropic_base_url(base_url: str) -> str:
+    """Root URL for the Anthropic ``messages`` wire (no trailing ``/v1``).
+
+    The Anthropic client (claude-sdk/-native) appends ``/v1/messages`` itself,
+    so the gateway base must be the ROOT — strip a trailing ``/v1`` (else the
+    client hits ``/v1/v1/messages`` → 404). Empty stays empty.
+    """
+    url = (base_url or "").rstrip("/")
+    if url.endswith("/v1"):
+        url = url[:-3].rstrip("/")
+    return url
+
+
 def _build_config_yaml(*, base_url: str, api_key: str, model: str) -> str:
     """Render Omnigent's ``~/.omnigent/config.yaml`` from resolved provider env.
 
-    A single ``gateway``-kind provider points the ``pi`` harness at the
-    BenchFlow provider endpoint over the OpenAI ``chat`` wire. Values are
-    written **literally** (no ``$ENV`` refs): the daemon-spawned runner does not
-    expand env-refs, so the literal API key + base URL + model are required.
+    One ``gateway``-kind provider carries BOTH families the BenchFlow gateway
+    serves — ``openai`` (the chat wire: pi, openai-agents, codex) and
+    ``anthropic`` (the messages wire: claude-sdk/-native). ``default: true``
+    makes it the default for every family it serves, so omnigent's own runner
+    resolves each harness to its family and emits the per-harness
+    ``HARNESS_*_GATEWAY_*`` env vars — the adaptor does not route per harness.
+    ``wire_api: chat`` keeps codex on chat completions (the gateway serves no
+    Responses wire).
 
-    All scalar values are double-quoted with the contained ``"`` / ``\\``
-    escaped, so an API key or URL with YAML-special characters can't break the
-    document. ``model`` is emitted under ``models.default`` (the harness's
-    default model) and is also forwarded per turn via ``omnigent run --model``.
+    Values are written **literally** (no ``$ENV`` refs): the daemon-spawned
+    runner does not expand env-refs. All scalars are double-quoted with ``"`` /
+    ``\\`` escaped so a key or URL with YAML-special characters can't break the
+    document. ``model`` is emitted under each family's ``models.default`` and
+    also forwarded per turn via ``omnigent run --model``.
     """
 
     def _q(value: str) -> str:
@@ -98,19 +121,18 @@ def _build_config_yaml(*, base_url: str, api_key: str, model: str) -> str:
 
     return (
         "providers:\n"
-        "  deepseek:\n"  # arbitrary provider key — names the gateway block
+        "  gateway:\n"  # arbitrary provider key — names the gateway block
         "    kind: gateway\n"
-        # ``default: true`` marks this the default provider for every family it
-        # serves (here: openai). pi resolves it via its openai-family fallback,
-        # AND codex (mapped to the openai family) resolves it as ITS default — so
-        # omnigent's runner emits HARNESS_CODEX_GATEWAY_BASE_URL and routes codex
-        # through the gateway. ``default: pi`` only claimed the pi surface, so
-        # codex's gateway came back None (codex made no request).
         "    default: true\n"
         "    openai:\n"
         f"      base_url: {_q(base_url)}\n"
         f"      api_key: {_q(api_key)}\n"
         "      wire_api: chat\n"
+        "      models:\n"
+        f"        default: {_q(model)}\n"
+        "    anthropic:\n"
+        f"      base_url: {_q(_anthropic_base_url(base_url))}\n"
+        f"      api_key: {_q(api_key)}\n"
         "      models:\n"
         f"        default: {_q(model)}\n"
     )
@@ -225,47 +247,16 @@ class OmnigentAgent:
             self._exec_user,
         )
 
-        # Vendor-CLI harnesses ride the BenchFlow gateway via their OWN CLI's
-        # provider config. ``harness_env`` carries any env the CLI needs at run
-        # time (e.g. the gateway key codex reads via ``env_key``); the session
-        # exports it before ``omnigent run``.
-        harness_env: dict[str, str] = {}
-        if self._harness in _CLAUDE_HARNESSES:
-            # The Claude Code CLI is env-configured: point it at the BenchFlow
-            # gateway's Anthropic-messages route (same ANTHROPIC_* mapping
-            # claude-agent-acp uses). The gateway serves /v1/messages (unlike the
-            # /responses route codex needs), so the model alias routes fine.
-            # ANTHROPIC_BASE_URL must be the ROOT — the Anthropic client appends
-            # ``/v1/messages`` itself, so strip the resolved base's trailing /v1
-            # (else the client hits /v1/v1/messages → 404).
-            anthropic_base = raw_base_url.rstrip("/")
-            if anthropic_base.endswith("/v1"):
-                anthropic_base = anthropic_base[:-3].rstrip("/")
-            harness_env["ANTHROPIC_BASE_URL"] = anthropic_base
-            harness_env["ANTHROPIC_AUTH_TOKEN"] = api_key
-            if model:
-                harness_env["ANTHROPIC_MODEL"] = model
-
-        # The benchmark model passed on ``omnigent run --model``. omnigent's runner
-        # routes codex through the gateway from the config.yaml provider (above) and
-        # forwards this as HARNESS_CODEX_MODEL. The gateway has no native
-        # /v1/responses for the chat-only deepseek backend, so codex must target the
-        # responses→chat *bridge* deployment ``<model>-responses-bridge`` (codex is
-        # responses-only; the bridge name is non-slashed — a slashed id makes codex
-        # send no request). pi + claude take the plain benchmark model.
-        if self._harness in _CODEX_HARNESSES and model:
-            bare = model.rsplit("/", 1)[-1]
-            session_model = f"{bare}-responses-bridge"
-        else:
-            session_model = model
-
+        # Every harness routes through the one config.yaml provider written
+        # above; omnigent's runner resolves each to its family and sets the
+        # gateway env vars itself. The benchmark model is forwarded per turn via
+        # ``omnigent run --model`` (omnigent prefers it over the provider default).
         return OmnigentSession(
             sandbox,
-            model=session_model,
+            model=model,
             exec_user=self._exec_user,
             harness=self._harness,
             cwd=agent_cwd,
-            harness_env=harness_env,
         )
 
 
@@ -288,32 +279,21 @@ def build_omnigent_agent(**kwargs: Any) -> OmnigentAgent:
 # wires one per harness (see :data:`omnigent.register.HARNESSES`). The function
 # name uses underscores because hyphens aren't valid identifiers, so the
 # hyphenated ``openai-agents`` harness is reached via ``build_omnigent_openai_agents``.
-# slug → canonical ``omnigent --harness`` value:
+# slug → canonical ``omnigent --harness`` value. Exactly the harnesses omnigent
+# 0.1.0 implements (its ``OMNIGENT_HARNESSES`` set; ``claude`` + ``openai-agents``
+# are its accepted aliases). BenchFlow-hosted omnigent hosts only what omnigent
+# ships — the fictitious cursor/opencode/hermes/goose/qwen/kimi/copilot/
+# antigravity slugs (no harness in the pinned release) are deliberately omitted;
+# they return for free if omnigent adds them.
 _HARNESS_VALUES: dict[str, str] = {
     "pi": "pi",
     "claude": "claude-sdk",
     "codex": "codex",
-    "cursor": "cursor",
-    "opencode": "opencode-native",
-    "hermes": "hermes",
     "openai_agents": "openai-agents",
     "open_responses": "open-responses",
     "databricks_supervisor": "databricks_supervisor",
-    "goose": "goose",
-    "qwen": "qwen",
-    "kimi": "kimi",
-    "copilot": "copilot",
-    "antigravity": "antigravity",
-    "pi_native": "pi-native",
     "claude_native": "claude-native",
     "codex_native": "codex-native",
-    "cursor_native": "cursor-native",
-    "hermes_native": "hermes-native",
-    "goose_native": "goose-native",
-    "qwen_native": "qwen-native",
-    "kimi_native": "kimi-native",
-    "antigravity_native": "antigravity-native",
-    "kiro_native": "kiro-native",
 }
 
 
