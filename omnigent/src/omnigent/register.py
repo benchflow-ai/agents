@@ -135,8 +135,10 @@ HARNESSES: list[tuple[str, str, str]] = [
     (
         "codex",
         "codex",
-        "codex is responses-only; the gateway /v1/responses route 404s the model "
-        "(needs a benchflow-core litellm fix to register it on that route)",
+        "gateway /v1/responses now bridges the model (benchflow-core responses→"
+        "chat bridge landed; probe returns 200) — but the codex CLI launched by "
+        "omnigent's runner makes no request in-sandbox (0 output/requests, opaque: "
+        "omnigent surfaces no codex logs), so it doesn't complete a run yet",
     ),
     # Real omnigent-0.1.0 harnesses the upstream-derived list above omits:
     (
@@ -202,7 +204,7 @@ _install_codex = (
     # BenchFlow provider gateway serves. codex >=0.14x is ``responses``-only and
     # 500s against a chat-only gateway. 0.128 is the line codex-acp ships on
     # (``@agentclientprotocol/codex-acp@0.0.45`` → ``@openai/codex@^0.128.0``).
-    f"{_BENCHFLOW_NODE_PREFIX}/bin/npm install -g '@openai/codex@~0.128.0'; "
+    f"{_BENCHFLOW_NODE_PREFIX}/bin/npm install -g @openai/codex; "
     f'CODEX_BIN="{_BENCHFLOW_NODE_PREFIX}/bin/codex"; '
     'if [ ! -x "$CODEX_BIN" ]; then CODEX_BIN="$(command -v codex || true)"; fi; '
     'if [ -n "$CODEX_BIN" ] && [ -x "$CODEX_BIN" ]; then ln -sf "$CODEX_BIN" /usr/local/bin/codex; fi; '

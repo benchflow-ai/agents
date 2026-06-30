@@ -32,6 +32,7 @@ normalized to end with ``/v1``. The model is forwarded to ``omnigent run
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import shlex
@@ -225,31 +226,38 @@ class OmnigentAgent:
         # exports it before ``omnigent run``.
         harness_env: dict[str, str] = {}
         if self._harness in _CODEX_HARNESSES:
-            # codex is ``responses``-only (the ``chat`` wire was removed in 0.12x).
-            # Point it at the gateway with a custom provider on the ``responses``
-            # wire: the gateway's litellm proxy serves /v1/responses and bridges
-            # to the chat backend. The model MUST be the bare id — codex can't
-            # parse a ``provider/model`` slash (it then sends no request), and the
-            # gateway registers the stripped name too. The key is read from the
-            # OPENAI_API_KEY env (env_key), exported by the session.
+            # codex is ``responses``-only (the ``chat`` wire was removed). Point
+            # the codex CLI at the gateway via ``openai_base_url`` + an auth.json
+            # key (the default openai provider, on the responses wire). The gateway
+            # has no native /v1/responses for the chat-only deepseek backend, so it
+            # exposes a responses→chat *bridge* deployment named
+            # ``<model>-responses-bridge``; codex sends that name (non-slashed — a
+            # slashed model id makes codex send no request) and the gateway bridges
+            # it to /chat/completions.
             bare_model = model.rsplit("/", 1)[-1] if model else ""
+            responses_model = f"{bare_model}-responses-bridge" if bare_model else ""
             codex_toml = (
-                (f'model = "{bare_model}"\n' if bare_model else "")
+                (f'model = "{responses_model}"\n' if responses_model else "")
                 + 'model_provider = "benchflow"\n\n'
                 + "[model_providers.benchflow]\n"
                 + 'name = "benchflow"\n'
                 + f'base_url = "{base_url}"\n'
                 + 'env_key = "OPENAI_API_KEY"\n'
                 + 'wire_api = "responses"\n'
-                # The gateway (litellm) serves HTTP /v1/responses but not the
-                # responses *websocket*; without this codex hangs retrying the ws
-                # upgrade and never falls back to HTTP (0 requests). Force HTTP.
+                # The gateway serves HTTP /v1/responses but not the responses
+                # *websocket*; without this codex hangs retrying the ws upgrade and
+                # never falls back to HTTP (0 requests). Force HTTP.
                 + "supports_websockets = false\n"
             )
             codex_dir = f"{home}/.codex"
+            auth_b64 = base64.b64encode(
+                json.dumps({"OPENAI_API_KEY": api_key}).encode("utf-8")
+            ).decode("ascii")
             toml_b64 = base64.b64encode(codex_toml.encode("utf-8")).decode("ascii")
             await sandbox.exec(
                 f"mkdir -p {shlex.quote(codex_dir)} && "
+                f"printf %s {shlex.quote(auth_b64)} | base64 -d > {shlex.quote(codex_dir + '/auth.json')} && "
+                f"chmod 600 {shlex.quote(codex_dir + '/auth.json')} && "
                 f"printf %s {shlex.quote(toml_b64)} | base64 -d > {shlex.quote(codex_dir + '/config.toml')}",
                 user=self._exec_user,
                 timeout_sec=30,
