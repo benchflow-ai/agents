@@ -32,7 +32,6 @@ normalized to end with ``/v1``. The model is forwarded to ``omnigent run
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import os
 import shlex
@@ -101,7 +100,13 @@ def _build_config_yaml(*, base_url: str, api_key: str, model: str) -> str:
         "providers:\n"
         "  deepseek:\n"  # arbitrary provider key — names the gateway block
         "    kind: gateway\n"
-        "    default: pi\n"
+        # ``default: true`` marks this the default provider for every family it
+        # serves (here: openai). pi resolves it via its openai-family fallback,
+        # AND codex (mapped to the openai family) resolves it as ITS default — so
+        # omnigent's runner emits HARNESS_CODEX_GATEWAY_BASE_URL and routes codex
+        # through the gateway. ``default: pi`` only claimed the pi surface, so
+        # codex's gateway came back None (codex made no request).
+        "    default: true\n"
         "    openai:\n"
         f"      base_url: {_q(base_url)}\n"
         f"      api_key: {_q(api_key)}\n"
@@ -225,48 +230,7 @@ class OmnigentAgent:
         # time (e.g. the gateway key codex reads via ``env_key``); the session
         # exports it before ``omnigent run``.
         harness_env: dict[str, str] = {}
-        if self._harness in _CODEX_HARNESSES:
-            # codex is ``responses``-only (the ``chat`` wire was removed). Point
-            # the codex CLI at the gateway via ``openai_base_url`` + an auth.json
-            # key (the default openai provider, on the responses wire). The gateway
-            # has no native /v1/responses for the chat-only deepseek backend, so it
-            # exposes a responses→chat *bridge* deployment named
-            # ``<model>-responses-bridge``; codex sends that name (non-slashed — a
-            # slashed model id makes codex send no request) and the gateway bridges
-            # it to /chat/completions.
-            bare_model = model.rsplit("/", 1)[-1] if model else ""
-            responses_model = f"{bare_model}-responses-bridge" if bare_model else ""
-            codex_toml = (
-                (f'model = "{responses_model}"\n' if responses_model else "")
-                + 'model_provider = "benchflow"\n\n'
-                + "[model_providers.benchflow]\n"
-                + 'name = "benchflow"\n'
-                + f'base_url = "{base_url}"\n'
-                + 'env_key = "OPENAI_API_KEY"\n'
-                + 'wire_api = "responses"\n'
-                # The gateway serves HTTP /v1/responses but not the responses
-                # *websocket*; without this codex hangs retrying the ws upgrade and
-                # never falls back to HTTP (0 requests). Force HTTP.
-                + "supports_websockets = false\n"
-            )
-            codex_dir = f"{home}/.codex"
-            auth_b64 = base64.b64encode(
-                json.dumps({"OPENAI_API_KEY": api_key}).encode("utf-8")
-            ).decode("ascii")
-            toml_b64 = base64.b64encode(codex_toml.encode("utf-8")).decode("ascii")
-            await sandbox.exec(
-                f"mkdir -p {shlex.quote(codex_dir)} && "
-                f"printf %s {shlex.quote(auth_b64)} | base64 -d > {shlex.quote(codex_dir + '/auth.json')} && "
-                f"chmod 600 {shlex.quote(codex_dir + '/auth.json')} && "
-                f"printf %s {shlex.quote(toml_b64)} | base64 -d > {shlex.quote(codex_dir + '/config.toml')}",
-                user=self._exec_user,
-                timeout_sec=30,
-            )
-            harness_env["OPENAI_API_KEY"] = api_key
-            # Pin CODEX_HOME so codex reads the config we just wrote regardless of
-            # the HOME omnigent's runner spawns it under.
-            harness_env["CODEX_HOME"] = codex_dir
-        elif self._harness in _CLAUDE_HARNESSES:
+        if self._harness in _CLAUDE_HARNESSES:
             # The Claude Code CLI is env-configured: point it at the BenchFlow
             # gateway's Anthropic-messages route (same ANTHROPIC_* mapping
             # claude-agent-acp uses). The gateway serves /v1/messages (unlike the
@@ -282,11 +246,18 @@ class OmnigentAgent:
             if model:
                 harness_env["ANTHROPIC_MODEL"] = model
 
-        # Codex selects its model from the config.toml we wrote (and rejects a
-        # ``provider/model`` slug on the CLI), so omit ``--model`` for it. pi and
-        # claude DO take the benchmark model on ``omnigent run --model`` (claude
-        # otherwise falls back to its built-in default, which the gateway rejects).
-        session_model = "" if self._harness in _CODEX_HARNESSES else model
+        # The benchmark model passed on ``omnigent run --model``. omnigent's runner
+        # routes codex through the gateway from the config.yaml provider (above) and
+        # forwards this as HARNESS_CODEX_MODEL. The gateway has no native
+        # /v1/responses for the chat-only deepseek backend, so codex must target the
+        # responses→chat *bridge* deployment ``<model>-responses-bridge`` (codex is
+        # responses-only; the bridge name is non-slashed — a slashed id makes codex
+        # send no request). pi + claude take the plain benchmark model.
+        if self._harness in _CODEX_HARNESSES and model:
+            bare = model.rsplit("/", 1)[-1]
+            session_model = f"{bare}-responses-bridge"
+        else:
+            session_model = model
 
         return OmnigentSession(
             sandbox,

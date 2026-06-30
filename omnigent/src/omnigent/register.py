@@ -16,9 +16,11 @@ Status — per-harness (see :data:`_HARNESS_STATUS`)
 BenchFlow provider gateway (install → connect → ``omnigent run`` → verifier;
 citation-check reward 1.0). ``pi`` rides the gateway ``/v1/chat/completions``
 route; ``claude`` (the Claude Code CLI) rides ``/v1/messages``. ``omnigent-codex``
-/ ``-codex-native`` are wired (codex CLI + a responses-wire provider config) but
-**blocked**: codex is responses-only and the gateway's ``/v1/responses`` route
-404s the model (a benchflow-core/litellm matter). The remaining harnesses are
+**runs** end-to-end: it routes through the gateway's responses→chat bridge
+(omnigent provider routing via ``config.yaml default: true`` + a non-function
+tool filter + bubblewrap), makes real tool calls with no error — but stops early
+in omnigent's one-shot turn, so it does not yet reach reward 1.0. The remaining
+harnesses are
 **listed**: the per-harness ``session_factory`` resolves and omnigent is
 installed, but only the canonical 0.1.0 ``--harness`` values
 (:data:`_REAL_OMNIGENT_HARNESSES`) actually launch — the rest are upstream-only
@@ -135,10 +137,10 @@ HARNESSES: list[tuple[str, str, str]] = [
     (
         "codex",
         "codex",
-        "gateway /v1/responses now bridges the model (benchflow-core responses→"
-        "chat bridge landed; probe returns 200) — but the codex CLI launched by "
-        "omnigent's runner makes no request in-sandbox (0 output/requests, opaque: "
-        "omnigent surfaces no codex logs), so it doesn't complete a run yet",
+        "runs through the gateway (responses-bridge + omnigent provider routing + "
+        "non-function tool filter + bubblewrap); makes real tool calls (shell), no "
+        "error, ~11k tokens — but stops early in omnigent's one-shot turn (~2 LLM "
+        "calls vs pi's ~24), so reward is 0.0 on citation-check, not yet 1.0",
     ),
     # Real omnigent-0.1.0 harnesses the upstream-derived list above omits:
     (
@@ -258,16 +260,17 @@ OMNIGENT_INSTALL_CMD = (
     f'    ln -sf "{_BENCHFLOW_NODE_PREFIX}/bin/$_b" /usr/local/bin/$_b; '
     "  fi; "
     "done; "
-    # 1b) Install tmux. Omnigent's runner auto-creates a per-conversation REPL
-    #     terminal (the harness's shell/terminal tool runs inside it) and
-    #     hard-fails with "tmux is not installed or not on PATH" otherwise — the
-    #     turn then starts but the agent can never run a shell command (so it
-    #     never writes a file). Install via the image's package manager.
-    "if ! command -v tmux >/dev/null 2>&1; then "
+    # 1b) Install tmux + bubblewrap. Omnigent's runner auto-creates a
+    #     per-conversation REPL terminal (the harness's shell/terminal tool runs
+    #     inside it) and hard-fails with "tmux is not installed" otherwise — the
+    #     turn then starts but the agent can never run a shell command. The
+    #     terminal additionally wants ``bwrap`` (bubblewrap) to sandbox itself;
+    #     without it the auto-create raises and codex's shell tool can't run.
+    "if ! command -v tmux >/dev/null 2>&1 || ! command -v bwrap >/dev/null 2>&1; then "
     "  if command -v apt-get >/dev/null 2>&1; then "
-    "    apt-get update -qq && apt-get install -y -qq tmux; "
-    "  elif command -v dnf >/dev/null 2>&1; then dnf -y install tmux; "
-    "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache tmux; "
+    "    apt-get update -qq && apt-get install -y -qq tmux bubblewrap; "
+    "  elif command -v dnf >/dev/null 2>&1; then dnf -y install tmux bubblewrap; "
+    "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache tmux bubblewrap; "
     "  fi; "
     "fi; "
     "command -v tmux >/dev/null 2>&1 || { echo 'tmux install failed' >&2; exit 1; }; "
@@ -356,7 +359,7 @@ _REAL_OMNIGENT_HARNESSES = frozenset(
 _HARNESS_STATUS: dict[str, str] = {
     "pi": "worked",  # gateway /v1/chat/completions; reward 1.0
     "claude": "worked",  # gateway /v1/messages; reward 1.0
-    "codex": "blocked",  # gateway /v1/responses 404s the model
+    "codex": "runs",  # gateway-routed, tool calls, no error; reward not yet 1.0
     "codex-native": "blocked",
     "claude-native": "wip",  # native driver launches, no scoreable run yet
 }
@@ -372,6 +375,8 @@ def _description_for(slug: str, value: str, cli_note: str) -> str:
     status = _HARNESS_STATUS.get(slug)
     if status == "worked":
         return f"{base} STATUS: WORKED end-to-end on the BenchFlow provider gateway (citation-check reward 1.0) — {cli_note}."
+    if status == "runs":
+        return f"{base} STATUS: RUNS end-to-end on the gateway (real tool calls, no error) but does not yet reach reward 1.0 — {cli_note}."
     if status == "blocked":
         return f"{base} STATUS: wired but BLOCKED — {cli_note}."
     if status == "wip":
