@@ -108,6 +108,8 @@ def test_harness_table_covers_all_canonical_harnesses() -> None:
         "opencode": "opencode-native",
         "hermes": "hermes",
         "openai-agents": "openai-agents",
+        "open-responses": "open-responses",
+        "databricks-supervisor": "databricks_supervisor",
         "goose": "goose",
         "qwen": "qwen",
         "kimi": "kimi",
@@ -197,21 +199,21 @@ def test_register_wires_all_harnesses_with_seam() -> None:
 
 
 def test_register_includes_pi_and_claude_with_seam() -> None:
-    """Spot-check the worked agent + a listed one (the task's minimum)."""
+    """Spot-check the two verified agents (pi + claude both WORKED)."""
     if not _seam_present():
         pytest.skip("benchflow build lacks the session-factory seam")
 
     by_name = {c.name: c for c in register()}
     assert "omnigent-pi" in by_name and "omnigent-claude" in by_name
 
-    # pi is the fully-worked one — no listed-not-wired caveat in its blurb.
-    assert "STATUS: listed" not in by_name["omnigent-pi"].description
+    # pi is verified — WORKED, no listed caveat in its blurb.
+    assert "STATUS: WORKED" in by_name["omnigent-pi"].description
     assert by_name["omnigent-pi"].launch_cmd == "omnigent run --harness pi"
 
-    # claude is listed-not-wired and honest about it (claude-sdk harness value).
+    # claude is verified WORKED (claude-sdk harness value) and its install_cmd
+    # appends the Claude Code CLI to the shared omnigent install.
     claude = by_name["omnigent-claude"]
     assert claude.launch_cmd == "omnigent run --harness claude-sdk"
-    assert "STATUS: listed" in claude.description
-    assert "not yet wired" in claude.description
-    # all harnesses reuse the shared install_cmd.
-    assert claude.install_cmd == OMNIGENT_INSTALL_CMD
+    assert "STATUS: WORKED" in claude.description
+    assert claude.install_cmd.startswith(OMNIGENT_INSTALL_CMD)
+    assert "@anthropic-ai/claude-code" in claude.install_cmd

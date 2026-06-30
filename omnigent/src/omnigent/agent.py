@@ -318,6 +318,8 @@ _HARNESS_VALUES: dict[str, str] = {
     "opencode": "opencode-native",
     "hermes": "hermes",
     "openai_agents": "openai-agents",
+    "open_responses": "open-responses",
+    "databricks_supervisor": "databricks_supervisor",
     "goose": "goose",
     "qwen": "qwen",
     "kimi": "kimi",
