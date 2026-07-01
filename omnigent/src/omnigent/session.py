@@ -77,6 +77,20 @@ _WORKSPACE = "/app"
 # ``BENCHFLOW_OMNIGENT_RUN_TIMEOUT_SEC`` for unusually long benchmarks.
 _RUN_TIMEOUT_SEC = int(os.environ.get("BENCHFLOW_OMNIGENT_RUN_TIMEOUT_SEC", "1800"))
 
+# omnigent 0.3.0's daemon/server startup is racy in a resource-constrained
+# sandbox: the host-daemon occasionally exits before its Omnigent server becomes
+# ready, so ``omnigent run`` aborts at startup with one of these markers (see
+# omnigent cli.py ``_discover_local_server_url``). This is a TRANSIENT startup
+# race — the same harness scores reward 1.0 once the daemon comes up — not an
+# agent failure, so retry the run (``omnigent stop`` at the head of the command
+# clears the half-started daemon first). A real agent failure never matches these
+# markers and so is never retried.
+_STARTUP_RACE_MARKERS = (
+    "daemon exited before its Omnigent server became ready",
+    "waiting for the local Omnigent server",
+)
+_MAX_STARTUP_ATTEMPTS = int(os.environ.get("BENCHFLOW_OMNIGENT_STARTUP_ATTEMPTS", "4"))
+
 # Substrings that mark a stdout line as server/health/framework noise rather
 # than substantive agent output. ``omnigent run`` spins its per-harness FastAPI
 # wrap transiently, so uvicorn/starlette banners and INFO logs can interleave
@@ -127,6 +141,13 @@ def _final_agent_line(stdout: str) -> str:
     if not substantive:
         return stdout.strip()
     return "\n".join(substantive).strip()
+
+
+def _is_startup_race(stdout: str, stderr: str) -> bool:
+    """True when a failed ``omnigent run`` aborted on the daemon/server startup
+    race (see ``_STARTUP_RACE_MARKERS``) rather than a real agent failure."""
+    blob = f"{stdout or ''}\n{stderr or ''}"
+    return any(marker in blob for marker in _STARTUP_RACE_MARKERS)
 
 
 class OmnigentSession:
@@ -196,18 +217,36 @@ class OmnigentSession:
             f"-p {shlex.quote(text)}"
         )
 
-        try:
-            result = await self._sandbox.exec(
-                cmd,
-                user=self._exec_user,
-                timeout_sec=_RUN_TIMEOUT_SEC,
-            )
-        except Exception as e:  # pragma: no cover - exec transport failure
-            logger.error(f"OmnigentSession: omnigent run exec failed: {e}")
-            self._emit(
-                {"type": "agent_message", "text": f"[error] omnigent run failed: {e}"}
-            )
-            return StopReason.END_TURN
+        # Retry ONLY the transient daemon/server startup race (0.3.0 flake) — a
+        # real agent failure never matches _STARTUP_RACE_MARKERS and runs once.
+        result = None
+        for attempt in range(1, _MAX_STARTUP_ATTEMPTS + 1):
+            try:
+                result = await self._sandbox.exec(
+                    cmd,
+                    user=self._exec_user,
+                    timeout_sec=_RUN_TIMEOUT_SEC,
+                )
+            except Exception as e:  # pragma: no cover - exec transport failure
+                logger.error(f"OmnigentSession: omnigent run exec failed: {e}")
+                self._emit(
+                    {
+                        "type": "agent_message",
+                        "text": f"[error] omnigent run failed: {e}",
+                    }
+                )
+                return StopReason.END_TURN
+            if result.return_code == 0 or not _is_startup_race(
+                result.stdout, result.stderr
+            ):
+                break
+            if attempt < _MAX_STARTUP_ATTEMPTS:
+                logger.warning(
+                    "OmnigentSession: omnigent daemon startup race "
+                    "(attempt %d/%d) — retrying",
+                    attempt,
+                    _MAX_STARTUP_ATTEMPTS,
+                )
 
         final = _final_agent_line(result.stdout)
         if final:

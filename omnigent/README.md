@@ -3,15 +3,17 @@
 [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents)
 as a [BenchFlow](https://github.com/benchflow-ai/benchflow) agent — the Omnigent
 meta-harness wired in through the public `benchflow.register_agent` extension
-point, maintained outside the core framework. The package hosts **exactly the six
-standalone coding harnesses omnigent 0.1.0 dispatches** (`pi`, `claude`,
-`claude-native`, `codex`, `codex-native`, `openai-agents`) — one BenchFlow agent
-each, no fictitious slugs (see [Harnesses](#harnesses)). **`omnigent-pi` and
-`omnigent-claude` are verified end-to-end on the BenchFlow provider gateway
-(citation-check reward 1.0)**; `omnigent-openai-agents` runs end-to-end with the
-raw `llm_trajectory` captured; `omnigent-codex` is wired but blocked upstream
-(the gateway has no `/v1/responses` route); the rest carry honest per-harness
-status below.
+point, maintained outside the core framework. The package hosts **all 22 harnesses
+the pinned omnigent (`0.3.0`) dispatches** — one BenchFlow agent per
+`omnigent run --harness <value>`, defined one-spec-per-file in
+[`omnigent/harnesses/`](src/omnigent/harnesses) (mirroring omnigent's own
+`inner/*_harness.py` + `harness_aliases.py`) so a future omnigent bump is a
+one-directory migration. **`omnigent-pi` and `omnigent-claude` are verified
+end-to-end on the BenchFlow provider gateway (citation-check reward 1.0)**;
+`omnigent-openai-agents` runs end-to-end with the raw `llm_trajectory` captured;
+`omnigent-codex` is gateway-wired but blocked (the gateway has no `/v1/responses`
+route); the remaining vendor harnesses register + dispatch but need a vendor CLI +
+key the gateway doesn't serve (**needs-vendor**). See [Harnesses](#harnesses).
 
 Every harness rides the **same** path: `connect()` writes ONE gateway provider
 into the sandbox `~/.omnigent/config.yaml`, and omnigent's own runner routes each
@@ -36,37 +38,34 @@ benchflow kernel ──session-factory──▶ OmnigentAgent.connect()         
 
 ## Harnesses
 
-One BenchFlow agent is registered per **standalone coding harness omnigent 0.1.0
-dispatches** via `omnigent run --harness X` — the coding-agent keys of omnigent's
-own `runtime.harnesses._HARNESS_MODULES` (`claude` is its alias for `claude-sdk`).
-Named `omnigent-<slug>`, wired to `omnigent run --harness <value>`. **We host only
-what the pinned release can launch as a coding agent.** Deliberately excluded:
+One BenchFlow agent is registered per harness omnigent **0.3.0** dispatches (its
+`runtime.harnesses._HARNESS_MODULES`, aliases folded — `claude`→`claude-sdk`,
+`opencode`→`opencode-native`, …). Named `omnigent-<slug>`, wired to `omnigent run
+--harness <value>`. Each harness is one spec module in
+[`omnigent/harnesses/`](src/omnigent/harnesses) (the single source of truth); the
+`HARNESSES` table, the `build_omnigent_*` factories, and the status/install maps
+all **derive** from it. Adding/migrating a harness = one spec module.
 
-- **`open-responses`** — in the validator's `OMNIGENT_HARNESSES` set but *not* in
-  `_HARNESS_MODULES` (an in-process executor-factory mode, not a subprocess
-  harness), so `omnigent run --harness open-responses` cannot launch it.
-- **`databricks_supervisor`** — dispatches, but is an orchestrator that drives the
-  Databricks Agent Bricks Supervisor API, not a coding agent runnable on the gateway.
-- **cursor / opencode / hermes / goose / qwen / kimi / copilot / antigravity** —
-  no harness in the pinned release at all (omnigent's website advertises some of
-  these, but 0.1.0 does not ship them).
-
-All omitted, not stubbed; they return for free once omnigent ships/dispatches them.
-Adding a harness = one row in `register.HARNESSES` + one in `agent._HARNESS_VALUES`.
-Status is tracked per harness in `register._HARNESS_STATUS`.
+**Registered ≠ runs on the gateway.** The BenchFlow deepseek gateway serves only
+the openai-chat + anthropic-messages wires, and omnigent applies our provider
+only to harnesses in its `provider_config._HARNESS_FAMILY` (plus `pi`). So most of
+the vendor harnesses register + dispatch on 0.3.0 but fall back to their own
+vendor CLI + API key — flagged **needs-vendor**, not silently broken.
 
 Status legend: **WORKED** (verified e2e, reward 1.0) · **RUNS** (e2e, raw
-`llm_trajectory` captured, reward < 1.0) · **blocked** (gateway-wired, its wire
-not yet served) · **WIP** (gateway-wired, no scoreable run yet).
+`llm_trajectory` captured, reward < 1.0) · **blocked** (gateway-wired, wire not
+served) · **WIP** (gateway-wired, no scoreable run yet) · **needs-vendor**
+(dispatches, but needs a vendor CLI + key the gateway does not serve).
 
-| BenchFlow agent | `--harness` value | status |
+| BenchFlow agent(s) | `--harness` value | status |
 | --- | --- | --- |
-| `omnigent-pi` | `pi` | **WORKED** — verified e2e (reward 1.0); `pi` CLI on the gateway openai chat wire |
-| `omnigent-claude` | `claude-sdk` | **WORKED** — verified e2e (reward 1.0); Claude Code CLI (`@anthropic-ai/claude-code`) on the gateway anthropic `/v1/messages` wire |
-| `omnigent-openai-agents` | `openai-agents` | **RUNS** — e2e on the gateway openai chat wire, raw `llm_trajectory` captured; reward not yet 1.0 (omnigent bundles the harness, no extra CLI) |
-| `omnigent-codex` | `codex` | **blocked** — codex CLI (`@openai/codex`) gateway-wired, but codex speaks the openai Responses wire and the gateway serves no `/v1/responses` → api_error. Unblocks via benchflow-core (#38) |
-| `omnigent-codex-native` | `codex-native` | **blocked** — omnigent's native codex driver; same Responses-wire blocker as `codex` |
-| `omnigent-claude-native` | `claude-native` | **WIP** — Claude Code CLI gateway-wired on the anthropic wire; the native driver launches but does not yet surface a scoreable run |
+| `omnigent-pi` | `pi` | **WORKED** — reward 1.0; gateway openai/pi wire |
+| `omnigent-claude` | `claude-sdk` | **WORKED** — reward 1.0; Claude Code CLI, gateway anthropic `/v1/messages` |
+| `omnigent-openai-agents` | `openai-agents` | **RUNS** — gateway openai chat, `llm_trajectory` captured (bundled SDK, no extra CLI) |
+| `omnigent-codex` · `-codex-native` | `codex` · `codex-native` | **blocked** — `@openai/codex` gateway-wired but Responses wire; gateway has no `/v1/responses` (#38) |
+| `omnigent-claude-native` | `claude-native` | **WIP** — Claude Code CLI, gateway anthropic wire; native driver launches, no scoreable run yet |
+| `omnigent-qwen` · `-antigravity` | `qwen` · `antigravity` | **WIP** — openai-compatible wire, our provider applies; need their CLI to launch |
+| `omnigent-pi-native` · `-cursor(-native)` · `-kimi(-native)` · `-qwen-native` · `-goose(-native)` · `-hermes(-native)` · `-antigravity-native` · `-copilot` · `-kiro-native` · `-opencode-native` | (12 vendor/native) | **needs-vendor** — dispatch on 0.3.0 but use a wire the gateway doesn't serve (need vendor CLI + key) |
 
 **How a harness rides the gateway:** `OmnigentAgent.connect` writes one
 `gateway`-kind provider into `~/.omnigent/config.yaml` carrying both families the
@@ -81,17 +80,14 @@ back-compat alias defaulting to `pi`.
 
 ### Provenance
 
-Three distinct "harness sets" exist in omnigent 0.1.0 — don't conflate them:
-
-- `omnigent.spec._omnigent_compat.OMNIGENT_HARNESSES` (8) — what the `--harness`
-  **validator accepts**. Includes `open-responses` (no runnable subprocess module)
-  and `databricks_supervisor` (orchestrator).
-- `omnigent.runtime.harnesses._HARNESS_MODULES` (8 keys incl. the `claude` alias)
-  — what `omnigent run --harness X` can actually **dispatch**. This is the set we
-  register from; its coding-agent keys are the six we host.
-- omnigent's **website/blog** advertises a different, inconsistent ~3–6 (Claude
-  Code, Codex, Cursor, OpenCode, Hermes, Pi) — aspirational; Cursor/OpenCode/Hermes
-  are **not** in the pinned 0.1.0 release.
+The harness set is **version-dependent** — 0.1.0 dispatched ~6, 0.2.0 ten, 0.3.0
+all 22. We register from `omnigent.runtime.harnesses._HARNESS_MODULES` (what
+`omnigent run --harness X` can actually **dispatch**), NOT the `--harness`
+validator set (`OMNIGENT_HARNESSES`, which also lists non-dispatchable entries) and
+NOT omnigent's website/blog (which advertises an inconsistent ~3–6 aspirational
+names). On a pin bump, re-mirror the spec modules in
+[`omnigent/harnesses/`](src/omnigent/harnesses) + `harnesses/_aliases.py` against
+the new release's `_HARNESS_MODULES` + `harness_aliases.py`.
 
 Re-check against the installed release: print `_HARNESS_MODULES`, or run `omnigent
 run --harness x` (the error lists validator-accepted values), or scan the source:
@@ -220,12 +216,21 @@ reward. `omnigent-codex` is wired but blocked upstream (see [Harnesses](#harness
 > per-tool-call stream), **not** a routing gap: the reward and the raw
 > `llm_trajectory` are real.
 
+Known behaviour — flaky daemon startup (0.3.0): omnigent 0.3.0's host-daemon
+occasionally exits before its local server becomes ready in the
+resource-constrained sandbox (`omnigent run` aborts with "The local daemon exited
+before its Omnigent server became ready"). This is a transient startup race — the
+same harness scores reward 1.0 once the daemon comes up — so `OmnigentSession`
+**retries** the run on that specific signature (`omnigent stop` first), up to
+`BENCHFLOW_OMNIGENT_STARTUP_ATTEMPTS` (default 4). A real agent failure never
+matches the retry markers and runs once.
+
 Known limitation — coarse trajectories: the stdout-parsing adapter emits only
 the prompt + final agent message, so per-tool-call granularity is absent
 (`n_tool_calls` reads 0 even though the harness used tools). The reward is real;
 the trajectory just isn't step-auditable. This is **inherent to omnigent's
-headless one-shot mode**, not an easy fix: as of `omnigent==0.1.0`, the `-p`
-one-shot path exposes no tool-call stream — `--debug-events` only drives the
+headless one-shot mode**, not an easy fix: the `-p` one-shot path exposes no
+tool-call stream — `--debug-events` only drives the
 interactive REPL event tape, `--log` is *rejected* with `-p`
 ("only supported in interactive REPL mode"), and the server's `chat.db` is torn
 down on exit. Surfacing tool calls therefore requires a larger rework: keep the

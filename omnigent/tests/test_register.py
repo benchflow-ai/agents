@@ -6,13 +6,11 @@ on any benchflow. The full registration assertions gate on the session-factory
 seam: on a benchflow whose ``VALID_PROTOCOLS`` lacks ``"session-factory"`` (e.g.
 published 0.6.x), ``register()`` returns ``None`` by design and those tests skip.
 
-Scope: the package hosts exactly the standalone coding harnesses omnigent 0.1.0
-dispatches via ``omnigent run --harness X`` (the coding-agent keys of its
-``_HARNESS_MODULES`` — one ``omnigent-<slug>`` per ``HARNESSES`` entry, no
-fictitious vendor slugs, no non-dispatchable open-responses, no
-databricks_supervisor orchestrator). Every harness rides ONE gateway provider
-written into the sandbox ``~/.omnigent/config.yaml``; omnigent's own runner routes
-each to its provider family, so ``connect()`` carries no per-harness wiring.
+Scope: the package hosts all 22 harnesses omnigent **0.3.0** dispatches (derived
+from the spec registry in :mod:`omnigent.harnesses`; see ``test_harnesses.py`` for
+the registry invariants). Every harness rides ONE gateway provider written into
+the sandbox ``~/.omnigent/config.yaml``; omnigent's own runner routes each to its
+provider family, so ``connect()`` carries no per-harness wiring.
 """
 
 import asyncio
@@ -33,19 +31,33 @@ from omnigent.register import (
     register,
 )
 
-# The standalone coding harnesses omnigent 0.1.0 dispatches via
-# ``omnigent run --harness X`` (the coding-agent keys of its _HARNESS_MODULES;
-# ``claude`` is the alias for claude-sdk). The single source of truth for every
-# per-harness assertion below. open-responses (not dispatchable — absent from
-# _HARNESS_MODULES) and databricks_supervisor (orchestrator, not a coding agent)
-# are deliberately excluded.
+# All 22 harnesses omnigent 0.3.0 dispatches (slug -> ``--harness`` value), the
+# hard-coded literal the derived ``HARNESSES`` table is checked against — fails if
+# a spec module is dropped, duplicated, or mis-slugged. ``claude`` is omnigent's
+# alias for ``claude-sdk``; every other slug equals its value.
 _EXPECTED_HARNESSES = {
     "pi": "pi",
+    "pi-native": "pi-native",
     "claude": "claude-sdk",
     "claude-native": "claude-native",
     "codex": "codex",
     "codex-native": "codex-native",
     "openai-agents": "openai-agents",
+    "cursor": "cursor",
+    "cursor-native": "cursor-native",
+    "kimi": "kimi",
+    "kimi-native": "kimi-native",
+    "qwen": "qwen",
+    "qwen-native": "qwen-native",
+    "goose": "goose",
+    "goose-native": "goose-native",
+    "hermes": "hermes",
+    "hermes-native": "hermes-native",
+    "antigravity": "antigravity",
+    "antigravity-native": "antigravity-native",
+    "copilot": "copilot",
+    "kiro-native": "kiro-native",
+    "opencode-native": "opencode-native",
 }
 
 
@@ -148,31 +160,17 @@ def test_run_timeout_backstop_is_generous() -> None:
     assert _RUN_TIMEOUT_SEC >= 900
 
 
-# ── Harness table: only what omnigent ships ───────────────────────────────
+# ── Harness table: all 22 omnigent 0.3.0 dispatches ───────────────────────
 
 
-def test_harness_table_is_exactly_the_dispatchable_coding_harnesses() -> None:
-    """Only omnigent's dispatchable coding harnesses — no fictitious vendor slugs,
-    no non-dispatchable open-responses, no databricks_supervisor orchestrator."""
+def test_harness_table_is_exactly_omnigent_0_3_0_dispatch_set() -> None:
+    """The derived table is exactly the 22 harnesses omnigent 0.3.0 dispatches —
+    no more (no phantom 0.1.0-only slugs), no less (all vendor + native twins)."""
     by_slug = {slug: value for slug, value, _note in HARNESSES}
     assert by_slug == _EXPECTED_HARNESSES
-    # nothing that cannot launch as a coding agent via `omnigent run --harness X`.
-    assert not (
-        set(by_slug)
-        & {
-            "cursor",
-            "opencode",
-            "hermes",
-            "goose",
-            "qwen",
-            "kimi",
-            "copilot",
-            "antigravity",
-            "pi-native",
-            "open-responses",
-            "databricks-supervisor",
-        }
-    )
+    assert len(by_slug) == 22
+    # the 0.1.0-only non-coding slugs are NOT dispatchable on 0.3.0 and stay out.
+    assert not (set(by_slug) & {"open-responses", "databricks-supervisor"})
 
 
 def test_per_harness_factories_are_module_globals_with_right_harness() -> None:
@@ -321,3 +319,11 @@ def test_register_status_pi_claude_worked_codex_blocked() -> None:
     codex = by_name["omnigent-codex"]
     assert "BLOCKED" in codex.description
     assert "@openai/codex" in codex.install_cmd
+
+    # a vendor harness whose wire the gateway doesn't serve is honestly flagged
+    # needs-vendor and carries NO auto-install (its CLI is not provisioned).
+    goose = by_name["omnigent-goose"]
+    assert "vendor backend" in goose.description
+    assert (
+        goose.install_cmd == by_name["omnigent-openai-agents"].install_cmd
+    )  # bare install
