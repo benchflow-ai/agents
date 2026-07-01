@@ -5,7 +5,9 @@ from pathlib import Path
 from ai_sdk_harness.register import _install_cmd, _launch_cmd, register
 from benchflow.agents.registry import resolve_agent
 
-_SERVER = (Path(__file__).parents[1] / "src" / "ai_sdk_harness" / "server.mjs").read_text()
+_SERVER = (
+    Path(__file__).parents[1] / "src" / "ai_sdk_harness" / "server.mjs"
+).read_text()
 
 
 def test_register_wires_harness_agent() -> None:
