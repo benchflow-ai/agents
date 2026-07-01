@@ -12,6 +12,11 @@ dependencies = [
     "pyyaml>=6",
 ]
 
+# BenchFlow discovers this package automatically (registry entry-point
+# autoload): importing the module registers its agents.
+[project.entry-points."benchflow.agents"]
+mini-swe-acp = "mini_swe_acp"
+
 [project.urls]
 Repository = "https://github.com/benchflow-ai/agents"
 Documentation = "https://github.com/benchflow-ai/agents/tree/main/acp/mini-swe-acp#readme"
