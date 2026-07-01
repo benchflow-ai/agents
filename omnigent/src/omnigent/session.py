@@ -145,12 +145,18 @@ class OmnigentSession:
         model: str | None,
         exec_user: str = "root",
         harness: str = "pi",
+        cwd: str | None = None,
     ) -> None:
         self._sandbox = sandbox
         self._model = model
         self._exec_user = exec_user
         # Canonical ``omnigent --harness`` value baked into each per-turn run.
         self._harness = harness
+        # Where ``omnigent run`` executes. The kernel resolves the per-rollout
+        # workspace and plumbs it through (BENCHFLOW_AGENT_CWD → OmnigentAgent →
+        # here); falls back to ``_WORKSPACE`` when unset so direct construction /
+        # older core keep the historical ``/app`` default.
+        self._cwd = cwd or _WORKSPACE
         self._ask_user_handler: AskUserHandler | None = None
         # Flat trajectory in the canonical on-disk event shape — see
         # benchflow.trajectories._capture._events_to_trajectory.
@@ -176,13 +182,17 @@ class OmnigentSession:
         model = self._model or ""
         # ``omnigent stop`` is harmless if no daemon is running; it clears any
         # stale per-harness server left by a prior turn. ``omnigent run`` is the
-        # one-shot turn (``-p`` exits after a single turn, no REPL). cwd=/app so
-        # output files land where the verifier reads.
+        # one-shot turn (``-p`` exits after a single turn, no REPL). cwd is the
+        # kernel-resolved workspace so output files land where the verifier reads.
+        # ``--model`` (the benchmark model) is forwarded when set; omnigent's
+        # runner routes every harness through the config.yaml gateway provider
+        # written at connect() time, so no per-harness env is needed here.
+        model_flag = f"--model {shlex.quote(model)} " if model else ""
         cmd = (
-            f"cd {shlex.quote(_WORKSPACE)} && "
+            f"cd {shlex.quote(self._cwd)} && "
             f"omnigent stop >/dev/null 2>&1; "
             f"omnigent run --harness {shlex.quote(self._harness)} "
-            f"--model {shlex.quote(model)} "
+            f"{model_flag}"
             f"-p {shlex.quote(text)}"
         )
 
@@ -223,7 +233,7 @@ class OmnigentSession:
         """Best-effort abort: stop any in-flight omnigent daemon in the sandbox."""
         try:
             await self._sandbox.exec(
-                f"cd {shlex.quote(_WORKSPACE)} && omnigent stop",
+                f"cd {shlex.quote(self._cwd)} && omnigent stop",
                 user=self._exec_user,
                 timeout_sec=30,
             )
