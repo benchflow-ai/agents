@@ -3,9 +3,10 @@
 [Databricks Omnigent](https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents)
 as a [BenchFlow](https://github.com/benchflow-ai/benchflow) agent — the Omnigent
 meta-harness wired in through the public `benchflow.register_agent` extension
-point, maintained outside the core framework. The package hosts **exactly the
-harnesses omnigent 0.1.0 ships** — one BenchFlow agent per omnigent `--harness`
-value, no fictitious slugs (see [Harnesses](#harnesses)). **`omnigent-pi` and
+point, maintained outside the core framework. The package hosts **exactly the six
+standalone coding harnesses omnigent 0.1.0 dispatches** (`pi`, `claude`,
+`claude-native`, `codex`, `codex-native`, `openai-agents`) — one BenchFlow agent
+each, no fictitious slugs (see [Harnesses](#harnesses)). **`omnigent-pi` and
 `omnigent-claude` are verified end-to-end on the BenchFlow provider gateway
 (citation-check reward 1.0)**; `omnigent-openai-agents` runs end-to-end with the
 raw `llm_trajectory` captured; `omnigent-codex` is wired but blocked upstream
@@ -35,22 +36,28 @@ benchflow kernel ──session-factory──▶ OmnigentAgent.connect()         
 
 ## Harnesses
 
-One BenchFlow agent is registered per harness omnigent 0.1.0 ships — its
-canonical `OMNIGENT_HARNESSES` set (`omnigent/spec/_omnigent_compat.py`), with
-`claude` / `openai-agents` as the accepted aliases for `claude-sdk` /
-`openai-agents-sdk`. Named `omnigent-<slug>`, wired to `omnigent run --harness
-<value>`. **We host only what omnigent implements** — the fictitious vendor slugs
-the README once advertised (cursor / opencode / hermes / goose / qwen / kimi /
-copilot / antigravity + their `*-native` variants) have no harness in the pinned
-release and are omitted, not stubbed; they return for free once omnigent ships
-them. Adding a harness = one row in `register.HARNESSES` + one in
-`agent._HARNESS_VALUES`. Status is tracked per harness in
-`register._HARNESS_STATUS`.
+One BenchFlow agent is registered per **standalone coding harness omnigent 0.1.0
+dispatches** via `omnigent run --harness X` — the coding-agent keys of omnigent's
+own `runtime.harnesses._HARNESS_MODULES` (`claude` is its alias for `claude-sdk`).
+Named `omnigent-<slug>`, wired to `omnigent run --harness <value>`. **We host only
+what the pinned release can launch as a coding agent.** Deliberately excluded:
+
+- **`open-responses`** — in the validator's `OMNIGENT_HARNESSES` set but *not* in
+  `_HARNESS_MODULES` (an in-process executor-factory mode, not a subprocess
+  harness), so `omnigent run --harness open-responses` cannot launch it.
+- **`databricks_supervisor`** — dispatches, but is an orchestrator that drives the
+  Databricks Agent Bricks Supervisor API, not a coding agent runnable on the gateway.
+- **cursor / opencode / hermes / goose / qwen / kimi / copilot / antigravity** —
+  no harness in the pinned release at all (omnigent's website advertises some of
+  these, but 0.1.0 does not ship them).
+
+All omitted, not stubbed; they return for free once omnigent ships/dispatches them.
+Adding a harness = one row in `register.HARNESSES` + one in `agent._HARNESS_VALUES`.
+Status is tracked per harness in `register._HARNESS_STATUS`.
 
 Status legend: **WORKED** (verified e2e, reward 1.0) · **RUNS** (e2e, raw
 `llm_trajectory` captured, reward < 1.0) · **blocked** (gateway-wired, its wire
-not yet served) · **WIP** (gateway-wired, no scoreable run yet) · **own-backend**
-(real harness whose wire the gateway does not serve).
+not yet served) · **WIP** (gateway-wired, no scoreable run yet).
 
 | BenchFlow agent | `--harness` value | status |
 | --- | --- | --- |
@@ -60,8 +67,6 @@ not yet served) · **WIP** (gateway-wired, no scoreable run yet) · **own-backen
 | `omnigent-codex` | `codex` | **blocked** — codex CLI (`@openai/codex`) gateway-wired, but codex speaks the openai Responses wire and the gateway serves no `/v1/responses` → api_error. Unblocks via benchflow-core (#38) |
 | `omnigent-codex-native` | `codex-native` | **blocked** — omnigent's native codex driver; same Responses-wire blocker as `codex` |
 | `omnigent-claude-native` | `claude-native` | **WIP** — Claude Code CLI gateway-wired on the anthropic wire; the native driver launches but does not yet surface a scoreable run |
-| `omnigent-open-responses` | `open-responses` | **own-backend** — real 0.1.0 harness on the Responses wire the gateway does not serve |
-| `omnigent-databricks-supervisor` | `databricks_supervisor` | **own-backend** — real 0.1.0 harness; expects a Databricks profile, not the gateway families |
 
 **How a harness rides the gateway:** `OmnigentAgent.connect` writes one
 `gateway`-kind provider into `~/.omnigent/config.yaml` carrying both families the
@@ -76,9 +81,20 @@ back-compat alias defaulting to `pi`.
 
 ### Provenance
 
-Re-check the live harness set against the pinned omnigent — the canonical set is
-`omnigent.spec._omnigent_compat.OMNIGENT_HARNESSES`, or run `omnigent run
---harness x` (the error lists the supported values), or scan the source:
+Three distinct "harness sets" exist in omnigent 0.1.0 — don't conflate them:
+
+- `omnigent.spec._omnigent_compat.OMNIGENT_HARNESSES` (8) — what the `--harness`
+  **validator accepts**. Includes `open-responses` (no runnable subprocess module)
+  and `databricks_supervisor` (orchestrator).
+- `omnigent.runtime.harnesses._HARNESS_MODULES` (8 keys incl. the `claude` alias)
+  — what `omnigent run --harness X` can actually **dispatch**. This is the set we
+  register from; its coding-agent keys are the six we host.
+- omnigent's **website/blog** advertises a different, inconsistent ~3–6 (Claude
+  Code, Codex, Cursor, OpenCode, Hermes, Pi) — aspirational; Cursor/OpenCode/Hermes
+  are **not** in the pinned 0.1.0 release.
+
+Re-check against the installed release: print `_HARNESS_MODULES`, or run `omnigent
+run --harness x` (the error lists validator-accepted values), or scan the source:
 `gh api repos/omnigent-ai/omnigent/git/trees/main?recursive=1 --jq '.tree[].path' | grep 'inner/.*_harness.py'`.
 
 Why in-sandbox subprocess and not the in-process `omnigent-client` SDK:

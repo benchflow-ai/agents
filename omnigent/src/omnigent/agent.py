@@ -279,21 +279,29 @@ def build_omnigent_agent(**kwargs: Any) -> OmnigentAgent:
 # wires one per harness (see :data:`omnigent.register.HARNESSES`). The function
 # name uses underscores because hyphens aren't valid identifiers, so the
 # hyphenated ``openai-agents`` harness is reached via ``build_omnigent_openai_agents``.
-# slug → canonical ``omnigent --harness`` value. Exactly the harnesses omnigent
-# 0.1.0 implements (its ``OMNIGENT_HARNESSES`` set; ``claude`` + ``openai-agents``
-# are its accepted aliases). BenchFlow-hosted omnigent hosts only what omnigent
-# ships — the fictitious cursor/opencode/hermes/goose/qwen/kimi/copilot/
-# antigravity slugs (no harness in the pinned release) are deliberately omitted;
-# they return for free if omnigent adds them.
+# slug → canonical ``omnigent --harness`` value. The standalone coding harnesses
+# omnigent 0.1.0 actually dispatches via ``omnigent run --harness X`` — i.e. the
+# keys of omnigent's own ``runtime.harnesses._HARNESS_MODULES`` that are coding
+# agents (``claude`` is its accepted alias for ``claude-sdk``). We host ONLY what
+# the pinned release can launch:
+#   * ``open-responses`` is in the validator's OMNIGENT_HARNESSES set but NOT in
+#     _HARNESS_MODULES (it's an in-process executor-factory mode, not a subprocess
+#     harness) — ``omnigent run --harness open-responses`` cannot launch it, so
+#     registering it would be a phantom agent.
+#   * ``databricks_supervisor`` dispatches but is an orchestrator that drives the
+#     Databricks Agent Bricks Supervisor API — not a coding agent runnable on the
+#     BenchFlow provider gateway.
+#   * cursor/opencode/hermes/goose/qwen/kimi/copilot/antigravity have no harness
+#     in the pinned release at all.
+# All of the above are omitted, not stubbed; they return for free if omnigent
+# ships/dispatches them.
 _HARNESS_VALUES: dict[str, str] = {
     "pi": "pi",
     "claude": "claude-sdk",
-    "codex": "codex",
-    "openai_agents": "openai-agents",
-    "open_responses": "open-responses",
-    "databricks_supervisor": "databricks_supervisor",
     "claude_native": "claude-native",
+    "codex": "codex",
     "codex_native": "codex-native",
+    "openai_agents": "openai-agents",
 }
 
 

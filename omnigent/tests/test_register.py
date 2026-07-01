@@ -6,11 +6,13 @@ on any benchflow. The full registration assertions gate on the session-factory
 seam: on a benchflow whose ``VALID_PROTOCOLS`` lacks ``"session-factory"`` (e.g.
 published 0.6.x), ``register()`` returns ``None`` by design and those tests skip.
 
-Scope: the package hosts exactly the harnesses omnigent 0.1.0 ships (its
-``OMNIGENT_HARNESSES`` set — one ``omnigent-<slug>`` per ``HARNESSES`` entry, no
-fictitious vendor slugs). Every harness rides ONE gateway provider written into
-the sandbox ``~/.omnigent/config.yaml``; omnigent's own runner routes each to its
-provider family, so ``connect()`` carries no per-harness wiring.
+Scope: the package hosts exactly the standalone coding harnesses omnigent 0.1.0
+dispatches via ``omnigent run --harness X`` (the coding-agent keys of its
+``_HARNESS_MODULES`` — one ``omnigent-<slug>`` per ``HARNESSES`` entry, no
+fictitious vendor slugs, no non-dispatchable open-responses, no
+databricks_supervisor orchestrator). Every harness rides ONE gateway provider
+written into the sandbox ``~/.omnigent/config.yaml``; omnigent's own runner routes
+each to its provider family, so ``connect()`` carries no per-harness wiring.
 """
 
 import asyncio
@@ -31,18 +33,19 @@ from omnigent.register import (
     register,
 )
 
-# The harnesses omnigent 0.1.0 implements (its OMNIGENT_HARNESSES set; ``claude``
-# / ``openai-agents`` are the accepted aliases). The single source of truth for
-# every per-harness assertion below.
+# The standalone coding harnesses omnigent 0.1.0 dispatches via
+# ``omnigent run --harness X`` (the coding-agent keys of its _HARNESS_MODULES;
+# ``claude`` is the alias for claude-sdk). The single source of truth for every
+# per-harness assertion below. open-responses (not dispatchable — absent from
+# _HARNESS_MODULES) and databricks_supervisor (orchestrator, not a coding agent)
+# are deliberately excluded.
 _EXPECTED_HARNESSES = {
     "pi": "pi",
     "claude": "claude-sdk",
-    "codex": "codex",
-    "openai-agents": "openai-agents",
-    "open-responses": "open-responses",
-    "databricks-supervisor": "databricks_supervisor",
     "claude-native": "claude-native",
+    "codex": "codex",
     "codex-native": "codex-native",
+    "openai-agents": "openai-agents",
 }
 
 
@@ -148,15 +151,15 @@ def test_run_timeout_backstop_is_generous() -> None:
 # ── Harness table: only what omnigent ships ───────────────────────────────
 
 
-def test_harness_table_is_exactly_what_omnigent_ships() -> None:
-    """No fictitious slugs — the table is omnigent 0.1.0's OMNIGENT_HARNESSES
-    (aliases resolved: claude→claude-sdk, openai-agents→openai-agents)."""
+def test_harness_table_is_exactly_the_dispatchable_coding_harnesses() -> None:
+    """Only omnigent's dispatchable coding harnesses — no fictitious vendor slugs,
+    no non-dispatchable open-responses, no databricks_supervisor orchestrator."""
     by_slug = {slug: value for slug, value, _note in HARNESSES}
     assert by_slug == _EXPECTED_HARNESSES
-    # the once-listed fictitious vendor slugs are gone.
+    # nothing that cannot launch as a coding agent via `omnigent run --harness X`.
     assert not (set(by_slug) & {
-        "cursor", "opencode", "hermes", "goose", "qwen", "kimi",
-        "copilot", "antigravity", "pi-native",
+        "cursor", "opencode", "hermes", "goose", "qwen", "kimi", "copilot",
+        "antigravity", "pi-native", "open-responses", "databricks-supervisor",
     })
 
 

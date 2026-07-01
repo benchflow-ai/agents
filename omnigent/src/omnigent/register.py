@@ -29,10 +29,9 @@ anthropic messages wire. ``omnigent-openai-agents`` **runs** end-to-end (real
 activity, ``llm_trajectory`` captured) but does not yet reach reward 1.0.
 ``omnigent-codex`` / ``-codex-native`` are gateway-wired but **blocked**: codex
 speaks the openai Responses wire and the gateway serves no ``/v1/responses``
-yet (unblocks via benchflow-core, #38). ``open-responses`` (Responses wire) and
-``databricks-supervisor`` (Databricks profile) are real harnesses whose wire the
-gateway does not serve, so they run on their own backend rather than gateway-
-routed. See each agent's ``description`` for its current status.
+yet (unblocks via benchflow-core, #38). ``omnigent-claude-native`` is gateway-
+wired (WIP) — it launches but does not yet surface a scoreable run. See each
+agent's ``description`` for its current status.
 
 Requires the session-factory seam (see README "Requirements")
 -------------------------------------------------------------
@@ -112,15 +111,21 @@ logger = logging.getLogger(__name__)
 # confirm the published PyPI tag during live verification and update here.
 OMNIGENT_PIN = "0.1.0"
 
-# Every harness omnigent 0.1.0 ships — its canonical ``OMNIGENT_HARNESSES`` set
-# (omnigent/spec/_omnigent_compat.py), with ``claude`` + ``openai-agents`` as the
-# accepted aliases for ``claude-sdk`` / ``openai-agents-sdk``. BenchFlow-hosted
-# omnigent hosts ONLY what omnigent officially implements; we do not re-implement
-# or pad the list. The fictitious vendor slugs the README once advertised
-# (cursor/opencode/hermes/goose/qwen/kimi/copilot/antigravity + their ``*-native``
-# variants) have no harness in the pinned release — omitted, not stubbed; they
-# return for free once omnigent ships them. Adding one = one row here + one
-# ``_HARNESS_VALUES`` row in agent.py.
+# The standalone CODING harnesses omnigent 0.1.0 actually dispatches via
+# ``omnigent run --harness X`` — the coding-agent keys of omnigent's own
+# ``runtime.harnesses._HARNESS_MODULES`` (``claude`` is its alias for
+# ``claude-sdk``). BenchFlow-hosted omnigent hosts ONLY what the pinned release
+# can launch; we do not re-implement or pad the list. Deliberately NOT registered:
+#   * ``open-responses`` — in the validator's OMNIGENT_HARNESSES set but absent
+#     from _HARNESS_MODULES (an in-process executor-factory mode, not a subprocess
+#     harness), so ``omnigent run --harness open-responses`` cannot launch it;
+#   * ``databricks_supervisor`` — dispatches, but is an orchestrator that drives
+#     the Databricks Agent Bricks Supervisor API, not a coding agent runnable on
+#     the BenchFlow gateway;
+#   * cursor/opencode/hermes/goose/qwen/kimi/copilot/antigravity — no harness in
+#     the pinned release at all.
+# All omitted, not stubbed; they return for free once omnigent ships/dispatches
+# them. Adding one = one row here + one ``_HARNESS_VALUES`` row in agent.py.
 #
 # Every harness rides the same path: connect() writes one gateway provider into
 # ``~/.omnigent/config.yaml`` and omnigent's own runner routes the harness to its
@@ -158,18 +163,6 @@ HARNESSES: list[tuple[str, str, str]] = [
         "openai-agents",
         "omnigent's bundled OpenAI-Agents harness; rides the gateway openai chat "
         "wire from the config.yaml provider (runs e2e, llm_trajectory captured)",
-    ),
-    (
-        "open-responses",
-        "open-responses",
-        "omnigent's open-responses harness; targets the openai Responses wire the "
-        "gateway does not serve, so it runs on its own backend (not gateway-routed)",
-    ),
-    (
-        "databricks-supervisor",
-        "databricks_supervisor",
-        "omnigent's own supervisor; expects a Databricks profile, not the openai/"
-        "anthropic gateway families — runs on its own backend",
     ),
     (
         "claude-native",
@@ -347,8 +340,6 @@ _HARNESS_STATUS: dict[str, str] = {
     "codex": "blocked",  # openai Responses wire — gateway has no /v1/responses
     "codex-native": "blocked",  # same Responses-wire blocker as codex
     "claude-native": "wip",  # native driver launches, no scoreable run yet
-    "open-responses": "own-backend",  # Responses wire — not served by the gateway
-    "databricks-supervisor": "own-backend",  # needs a Databricks profile
 }
 
 
@@ -368,11 +359,6 @@ def _description_for(slug: str, value: str, cli_note: str) -> str:
         return f"{base} STATUS: gateway-wired but BLOCKED (its wire is not yet served by the gateway) — {cli_note}."
     if status == "wip":
         return f"{base} STATUS: gateway-wired (WIP) — {cli_note}."
-    if status == "own-backend":
-        return (
-            f"{base} STATUS: real omnigent harness whose wire the gateway does not "
-            f"serve, so it runs on its own backend (not gateway-routed) — {cli_note}."
-        )
     return f"{base} STATUS: gateway-wired, not yet verified — {cli_note}."
 
 

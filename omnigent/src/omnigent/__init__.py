@@ -2,11 +2,10 @@
 
 Registers the Databricks `Omnigent <https://www.databricks.com/blog/introducing-omnigent-meta-harness-combine-control-and-share-your-agents>`_
 harnesses with BenchFlow through the public ``benchflow.register_agent``
-extension point — one ``omnigent-<slug>`` agent per harness omnigent 0.1.0 ships
-(``pi``, ``claude``, ``codex``, ``codex-native``, ``claude-native``,
-``openai-agents``, ``open-responses``, ``databricks-supervisor``; see
-:data:`omnigent.register.HARNESSES`). Importing this package performs the
-registration, so a benchmark run only needs::
+extension point — one ``omnigent-<slug>`` agent per standalone coding harness
+omnigent 0.1.0 dispatches (``pi``, ``claude``, ``claude-native``, ``codex``,
+``codex-native``, ``openai-agents``; see :data:`omnigent.register.HARNESSES`).
+Importing this package performs the registration, so a benchmark run only needs::
 
     import omnigent  # noqa: F401  (registers the omnigent-* agents)
 
