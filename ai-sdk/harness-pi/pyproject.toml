@@ -11,6 +11,11 @@ dependencies = [
     "benchflow>=0.5.2",
 ]
 
+# BenchFlow autoloads this (registry entry-point group): a callable value
+# is invoked, registering the agents.
+[project.entry-points."benchflow.agents"]
+ai-sdk-harness-pi = "ai_sdk_harness.register:register"
+
 [project.urls]
 Repository = "https://github.com/benchflow-ai/agents"
 Documentation = "https://github.com/benchflow-ai/agents/tree/main/ai-sdk/harness-pi#readme"
