@@ -157,10 +157,22 @@ def test_harness_table_is_exactly_the_dispatchable_coding_harnesses() -> None:
     by_slug = {slug: value for slug, value, _note in HARNESSES}
     assert by_slug == _EXPECTED_HARNESSES
     # nothing that cannot launch as a coding agent via `omnigent run --harness X`.
-    assert not (set(by_slug) & {
-        "cursor", "opencode", "hermes", "goose", "qwen", "kimi", "copilot",
-        "antigravity", "pi-native", "open-responses", "databricks-supervisor",
-    })
+    assert not (
+        set(by_slug)
+        & {
+            "cursor",
+            "opencode",
+            "hermes",
+            "goose",
+            "qwen",
+            "kimi",
+            "copilot",
+            "antigravity",
+            "pi-native",
+            "open-responses",
+            "databricks-supervisor",
+        }
+    )
 
 
 def test_per_harness_factories_are_module_globals_with_right_harness() -> None:
