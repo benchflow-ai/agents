@@ -58,9 +58,9 @@ from benchflow.agents.registry import (
 
 # Isolated prefix so MiMo's Node/deps stay out of the task image's own runtime.
 _PREFIX = "/opt/benchflow/js-agents/mimo-acp"
-_MIMO_PKG = "@mimo-ai/cli@0.1.1"  # pinned: an unpinned float can break ACP on upgrade
-# NOTE: this manifest pins @0.1.1 — the live-validated current release (newer than
-# the benchflow-core native `mimo` agent's @0.1.0; PR #679, which can bump separately).
+_MIMO_PKG = "@mimo-ai/cli@0.1.4"  # pinned: an unpinned float can break ACP on upgrade
+# NOTE: pinned @0.1.4 — the earlier @0.1.0/@0.1.1 pins were UNPUBLISHED from npm
+# (install failed `npm error notarget`); 0.1.4 is the current published release.
 _MIMO_BIN = f"{_PREFIX}/node_modules/@mimo-ai/cli/bin/mimo"
 _ALIASES = ("mimo-code",)
 
