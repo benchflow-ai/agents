@@ -5,9 +5,9 @@ Thanks for your interest! This monorepo hosts several agent families. The
 
 - **Self-contained** — `acp/mini-swe-acp` and `acp/mini-swe-code`.
 - The **`ai-sdk/`** group — `acp`, `harness-pi`, `harness-codex`,
-  `harness-claude-code`, `harness-mimo` — each pairs a pure-JS ACP server
-  (`server.mjs`) with a small Python `register.py` that wires the agent into
-  BenchFlow.
+  `harness-claude-code`, `harness-deepagents`, `harness-opencode` — each pairs a
+  pure-JS ACP server (`server.mjs`) with a small Python `register.py` that wires
+  the agent into BenchFlow.
 - **`omnigent/`** — its own Python package.
 
 The **`acp-registry/`** family is different: the `acp-registry/` pip package
@@ -64,7 +64,7 @@ runtimes (podman, bubblewrap, apptainer) — not required for most changes.
 ### ai-sdk/* (Python ≥3.12 + Node)
 
 ```bash
-cd ai-sdk/acp        # or harness-pi / harness-codex / harness-claude-code / harness-mimo
+cd ai-sdk/acp        # or harness-pi / harness-codex / harness-claude-code / harness-deepagents / harness-opencode
 uv venv .venv && source .venv/bin/activate
 uv pip install --prerelease=allow -e ".[dev]"   # benchflow pins an rc litellm
 pytest -q                                        # key-free; no sandbox/model needed
@@ -113,8 +113,8 @@ pytest -q
 ## CI
 
 Root `.github/workflows/` runs per-package tests (path-filtered) — including the
-`acp-registry`, `parity`, `omnigent`, `mimo-acp`, and `ai-sdk` (+ `harness-mimo`)
-jobs — plus ruff (pinned to the `.pre-commit-config.yaml` version) and a markdown
+`acp-registry`, `parity`, `omnigent`, `mimo-acp`, and `ai-sdk` jobs — plus ruff
+(pinned to the `.pre-commit-config.yaml` version) and a markdown
 link check on PRs. The `acp-registry` job also fails the build when `AGENTS.md` is
 stale, so regenerate it after any `catalog.py` (or snapshot) edit (see the
 acp-registry dev-setup above). The `contract/` tests are not yet a CI job — run

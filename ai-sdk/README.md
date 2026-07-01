@@ -11,8 +11,8 @@ across families.
 > **Official source.** The harness adapters are published from the
 > [vercel/ai monorepo](https://github.com/vercel/ai/tree/main/packages) as
 > `packages/harness-*`: `harness-pi`, `harness-codex`, `harness-claude-code`,
-> `harness-deepagents`, `harness-opencode`. This repo wraps **all five** (plus the
-> custom `harness-mimo`). The base [`@ai-sdk/harness`](https://www.npmjs.com/package/@ai-sdk/harness)
+> `harness-deepagents`, `harness-opencode`. This repo wraps **all five**. The base
+> [`@ai-sdk/harness`](https://www.npmjs.com/package/@ai-sdk/harness)
 > is the `HarnessAgent` abstraction itself, and `@ai-sdk/workflow-harness` runs a
 > `HarnessAgent` as a durable workflow — neither is a registerable coding agent, so
 > neither is listed here.
@@ -42,14 +42,8 @@ templates, not working evals.
 All packages above share the adapter pattern: a pure-JS ACP-over-stdio `server.mjs`
 wrapping the AI SDK agent, registered via `register.py` (public `register_agent`),
 atop `ai@6`. The vendor `@ai-sdk/harness*` packages span Vercel's AI SDK 7 line:
-`harness-pi`/`-codex`/`-claude-code` install `@canary` (`harness-mimo` pins
-`@1.0.0-canary.13`), while the newer `harness-deepagents`/`-opencode` pin the
-**stable** `@1.0.5`/`@1.0.6`. (`harness-mimo`, below, uses a custom `HarnessV1`
-adapter rather than a vendor `@ai-sdk/harness-*`.)
+`harness-pi`/`-codex`/`-claude-code` install `@canary`, while the newer
+`harness-deepagents`/`-opencode` pin the **stable** `@1.0.5`/`@1.0.6`.
 
 New AI SDK agent? Scaffold from `acp`:
 `python ../skills/adaptation-parity/scripts/scaffold_ai_sdk_agent.py <name>`.
-
-## harness-mimo (MiMo Code)
-
-`HarnessAgent` driving MiMo's **native** `mimo acp` via a thin custom `HarnessV1` adapter (no vendor `@ai-sdk/harness-<x>`, no JS-library wrap). Runs in-sandbox with the FS bridge, so it reads task input files AND writes outputs to the task cwd. Run `usage_tracking="off"`; free `mimo/mimo-auto` needs no key. See [harness-mimo/](harness-mimo/).
