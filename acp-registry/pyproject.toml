@@ -22,6 +22,12 @@ dependencies = [
     "benchflow>=0.6.3",
 ]
 
+# BenchFlow autoloads this (registry entry-point group): the callable is
+# invoked with no args, registering every *wired* agent (built-ins are
+# never overwritten).
+[project.entry-points."benchflow.agents"]
+acp-registry = "acp_registry:register"
+
 [project.urls]
 Repository = "https://github.com/benchflow-ai/agents"
 Documentation = "https://github.com/benchflow-ai/agents/tree/main/acp-registry#readme"

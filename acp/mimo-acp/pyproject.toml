@@ -9,6 +9,12 @@ dependencies = [
     "benchflow>=0.5.2",
 ]
 
+# BenchFlow discovers this package automatically (registry entry-point
+# autoload): importing the module registers the `mimo` agent (note: the
+# dist name is mimo-acp, the registered agent name is `mimo`).
+[project.entry-points."benchflow.agents"]
+mimo-acp = "mimo_acp"
+
 [project.urls]
 Repository = "https://github.com/benchflow-ai/agents"
 Documentation = "https://github.com/benchflow-ai/agents/tree/main/acp/mimo-acp#readme"
