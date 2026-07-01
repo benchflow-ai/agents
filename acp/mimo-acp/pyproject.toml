@@ -10,7 +10,8 @@ dependencies = [
 ]
 
 # BenchFlow discovers this package automatically (registry entry-point
-# autoload): importing the module registers its agents.
+# autoload): importing the module registers the `mimo` agent (note: the
+# dist name is mimo-acp, the registered agent name is `mimo`).
 [project.entry-points."benchflow.agents"]
 mimo-acp = "mimo_acp"
 

@@ -12,7 +12,9 @@ dependencies = [
 ]
 
 # BenchFlow autoloads this (registry entry-point group): a callable value
-# is invoked, registering the agents.
+# is invoked, registering the agents. NB: the module really is
+# `ai_sdk_harness` (not `ai_sdk_harness_pi`) — the package predates the
+# per-harness split.
 [project.entry-points."benchflow.agents"]
 ai-sdk-harness-pi = "ai_sdk_harness.register:register"
 
