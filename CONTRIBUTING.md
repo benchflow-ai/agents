@@ -10,6 +10,23 @@ Thanks for your interest! This monorepo hosts several agent families. The
   the agent into BenchFlow.
 - **`omnigent/`** — its own Python package.
 
+## Agent naming law
+
+One vendor agent may be hosted via several adaptation paths; registered names
+follow one rule (design: benchflow-ai/benchflow#876, harbor prior art):
+
+- **The native/ACP path owns bare names** — `mimo`, `goose`, `mini-swe`,
+  official ACP-registry ids verbatim (`qwen-code`, `github-copilot-cli`), and
+  the `-acp` suffix where the bare word needs qualifying (`pi-acp`,
+  `codex-acp`), usually with a bare alias (`pi`, `codex`).
+- **Every other path prefixes its name**: `ai-sdk-<vendor>` (`ai-sdk-pi`,
+  `ai-sdk-codex`) and `omnigent-<vendor>` (`omnigent-pi`).
+- Renames keep the old name as an alias forever.
+
+benchflow resolves the harbor-style shorthand `<ns>:<id>` onto these names
+(`acp:pi` → `pi-acp`, `omnigent:pi` → `omnigent-pi`, `ai-sdk:codex` →
+`ai-sdk-codex`), so conforming names get namespace addressing for free.
+
 The **`acp-registry/`** family is different: the `acp-registry/` pip package
 catalogs every agent, and most adapting agents ship a *declarative*
 `acp/<id>/manifest.toml` instead — 38 of them, with no `server.mjs` of their own

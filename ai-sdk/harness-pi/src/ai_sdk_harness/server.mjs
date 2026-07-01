@@ -104,7 +104,7 @@ async function handle(msg) {
   const { id, method, params = {} } = msg;
   try {
     if (method === "initialize")
-      send({ jsonrpc: "2.0", id, result: { protocolVersion: 1, agentInfo: { name: "ai-sdk-harness", version: "1.0" },
+      send({ jsonrpc: "2.0", id, result: { protocolVersion: 1, agentInfo: { name: "ai-sdk-pi", version: "1.0" },
         agentCapabilities: { loadSession: false, promptCapabilities: { image: false, audio: false } } } });
     else if (method === "session/new") { agentCwd = params.cwd || process.cwd(); send({ jsonrpc: "2.0", id, result: { sessionId } }); }
     else if (method === "session/set_model") { modelId = params.modelId || modelId; log("set_model:", modelId); send({ jsonrpc: "2.0", id, result: {} }); }

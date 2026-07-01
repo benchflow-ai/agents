@@ -36,7 +36,8 @@ _DEPS = (
     "@ai-sdk/sandbox-just-bash@canary",
     "just-bash",
 )
-_ALIASES = ("ai-sdk-pi", "pi-harness")
+# "ai-sdk-harness" is the historical canonical name, kept resolving forever.
+_ALIASES = ("ai-sdk-harness", "pi-harness")
 
 
 def _install_cmd() -> str:
@@ -63,7 +64,7 @@ def _launch_cmd() -> str:
 def register() -> None:
     """Register the ``ai-sdk-harness`` agent (and aliases) into BenchFlow."""
     register_agent(
-        name="ai-sdk-harness",
+        name="ai-sdk-pi",
         install_cmd=_install_cmd(),
         launch_cmd=_launch_cmd(),
         protocol="acp",
@@ -85,4 +86,4 @@ def register() -> None:
         ),
     )
     for alias in _ALIASES:
-        AGENT_ALIASES.setdefault(alias, "ai-sdk-harness")
+        AGENT_ALIASES.setdefault(alias, "ai-sdk-pi")
