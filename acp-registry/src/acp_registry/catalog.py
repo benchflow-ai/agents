@@ -646,7 +646,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="@github/copilot@1.0.65",
         acp_args="--acp",
-        status=WIRED,
+        status=RUNNABLE,
         summary="GitHub Copilot CLI; BYOK (own provider keys) is GA — NOT "
         "backend-locked. Built-in `--acp` server.",
         api_protocol="openai-completions",
@@ -660,12 +660,16 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         model_via="env",
         verified=(
             "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
-            "/v1/chat/completions, initialize+session/new OK — wired by "
-            "construction, no real-task reward claimed",
+            "/v1/chat/completions, initialize+session/new OK — but the smoke "
+            "environment carried residual auth state. LIVE sandbox runs "
+            "(2026-07 census, daytona) fail session/new with -32000 "
+            "'Authentication required' with full BYOK env AND "
+            "COPILOT_OFFLINE=true — the smoke result does not hold headless.",
         ),
         reason="npx (@github/copilot@1.0.65) via its built-in `--acp` server. "
-        "UNBLOCKED on 1.0.65 (resolves the prior 1.0.61 'Authentication required' "
-        "block): routes any OpenAI-compatible provider through the first-class "
+        "AUTH-GATED headless: despite the documented BYOK path, `--acp` "
+        "session/new demands GitHub cloud auth in a clean sandbox (live census "
+        "-32000 with BYOK env + COPILOT_OFFLINE=true). The wiring below routes any OpenAI-compatible provider through the first-class "
         "BYOK path purely via env (COPILOT_PROVIDER_TYPE=openai + "
         "COPILOT_PROVIDER_BASE_URL/_API_KEY + COPILOT_MODEL, bare wire model). "
         "Setting COPILOT_PROVIDER_BASE_URL makes the CLI use that provider instead "
