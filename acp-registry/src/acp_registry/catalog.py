@@ -89,7 +89,9 @@ class AcpAgent:
     launch_env: dict[str, str] = field(default_factory=dict)  # constant env
     acp_model_format: str = "bare"
     supports_acp_set_model: bool = False
-    model_via: str = ""  # "env" | "flag" | "config-file" | "set_model" | "config-option"
+    model_via: str = (
+        ""  # "env" | "flag" | "config-file" | "set_model" | "config-option"
+    )
     bin_name: str = ""  # npm bin name (npx install/launch); "" if N/A
     npm_extra: tuple[str, ...] = ()  # extra npm pkgs to install beside an npx agent
     #   (e.g. a provider SDK the agent imports lazily — deepagents needs @langchain/openai)
@@ -266,9 +268,12 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         },
         launch_env={
             "GOOSE_PROVIDER": "openai",
-            # goose's openai provider takes a host + base path (not one URL); the
-            # gateway/provider base URL is the host, the OpenAI path is constant.
-            "OPENAI_HOST": "$BENCHFLOW_PROVIDER_BASE_URL",
+            # goose's openai provider takes a host + base path (not one URL). The
+            # provider base may or may not carry a trailing /v1 (the LiteLLM
+            # proxy's does) — strip it, since OPENAI_BASE_PATH re-adds v1/;
+            # otherwise goose posts to /v1/v1/chat/completions (silent 404s,
+            # zero LLM calls).
+            "OPENAI_HOST": "${BENCHFLOW_PROVIDER_BASE_URL%/v1}",
             "OPENAI_BASE_PATH": "v1/chat/completions",
         },
         model_via="env",
@@ -278,7 +283,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
             "— agent didn't solve it with deepseek-v4-flash, not an integration "
             "failure)",
         ),
-        known_issue="OPENAI_HOST is set to the provider base URL and OPENAI_BASE_PATH "
+        known_issue="OPENAI_HOST is the provider base URL with a trailing /v1 stripped, and OPENAI_BASE_PATH "
         "to a constant v1/chat/completions — correct for a host-only base URL "
         "(DeepSeek, the LiteLLM gateway). A provider whose base URL already carries "
         "a path would double it up; such providers need the custom_providers JSON "
@@ -370,7 +375,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="acp",
-        status=WIRED,
+        status=RUNNABLE,
         summary="Vendor-agnostic agent; any OpenAI-compatible endpoint.",
         api_protocol="openai-completions",
         env_mapping={
@@ -389,7 +394,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         "OpenAI-compatible host via a launch-written ~/.crow config.yaml "
         "(providers/base_url/api_key/model with ${ENV} interpolation) — the binary "
         "installer + config-file writer (which also ships the required crow-mcp "
-        "tool server and a full sqlite:/// db_uri) is what unblocked it.",
+        "tool server and a full sqlite:/// db_uri) is what unblocked it. LIVE (2026-07 census): session/new -32603 headless despite pinned crow-mcp venv (py3.14); bootstrap issue persists.",
         source="https://github.com/crow-cli/crow-cli",
     ),
     AcpAgent(
@@ -643,7 +648,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=NPX,
         package="@github/copilot@1.0.65",
         acp_args="--acp",
-        status=WIRED,
+        status=RUNNABLE,
         summary="GitHub Copilot CLI; BYOK (own provider keys) is GA — NOT "
         "backend-locked. Built-in `--acp` server.",
         api_protocol="openai-completions",
@@ -657,12 +662,16 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         model_via="env",
         verified=(
             "ACP routing smoke (deepseek-v4-flash, mock gateway): 2 upstream "
-            "/v1/chat/completions, initialize+session/new OK — wired by "
-            "construction, no real-task reward claimed",
+            "/v1/chat/completions, initialize+session/new OK — but the smoke "
+            "environment carried residual auth state. LIVE sandbox runs "
+            "(2026-07 census, daytona) fail session/new with -32000 "
+            "'Authentication required' with full BYOK env AND "
+            "COPILOT_OFFLINE=true — the smoke result does not hold headless.",
         ),
         reason="npx (@github/copilot@1.0.65) via its built-in `--acp` server. "
-        "UNBLOCKED on 1.0.65 (resolves the prior 1.0.61 'Authentication required' "
-        "block): routes any OpenAI-compatible provider through the first-class "
+        "AUTH-GATED headless: despite the documented BYOK path, `--acp` "
+        "session/new demands GitHub cloud auth in a clean sandbox (live census "
+        "-32000 with BYOK env + COPILOT_OFFLINE=true). The wiring below routes any OpenAI-compatible provider through the first-class "
         "BYOK path purely via env (COPILOT_PROVIDER_TYPE=openai + "
         "COPILOT_PROVIDER_BASE_URL/_API_KEY + COPILOT_MODEL, bare wire model). "
         "Setting COPILOT_PROVIDER_BASE_URL makes the CLI use that provider instead "

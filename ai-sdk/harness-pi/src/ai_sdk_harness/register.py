@@ -82,7 +82,9 @@ def register() -> None:
         install_timeout=1200,  # canary harness + pi-coding-agent install is heavy
         description=(
             "Vercel AI SDK 7 HarnessAgent (Pi harness + just-bash local sandbox) "
-            "via ACP — experimental/canary; run with usage_tracking=off"
+            "via ACP — BLOCKED upstream: just-bash rejects the harness bootstrap "
+            "(security violation: dynamic import of node:module), so sessions "
+            "end with zero LLM activity; needs an upstream just-bash/harness fix"
         ),
     )
     for alias in _ALIASES:
