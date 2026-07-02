@@ -375,7 +375,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         distribution=BINARY,
         package="",
         acp_args="acp",
-        status=WIRED,
+        status=RUNNABLE,
         summary="Vendor-agnostic agent; any OpenAI-compatible endpoint.",
         api_protocol="openai-completions",
         env_mapping={
@@ -394,7 +394,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         "OpenAI-compatible host via a launch-written ~/.crow config.yaml "
         "(providers/base_url/api_key/model with ${ENV} interpolation) — the binary "
         "installer + config-file writer (which also ships the required crow-mcp "
-        "tool server and a full sqlite:/// db_uri) is what unblocked it.",
+        "tool server and a full sqlite:/// db_uri) is what unblocked it. LIVE (2026-07 census): session/new -32603 headless despite pinned crow-mcp venv (py3.14); bootstrap issue persists.",
         source="https://github.com/crow-cli/crow-cli",
     ),
     AcpAgent(
