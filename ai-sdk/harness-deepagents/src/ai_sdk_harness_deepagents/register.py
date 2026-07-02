@@ -78,8 +78,9 @@ def register() -> None:
         install_timeout=1200,  # harness + deepagents install is heavy
         description=(
             "Vercel AI SDK 7 HarnessAgent (DeepAgents harness + just-bash local "
-            "sandbox) via ACP — scaffolded/listed; model routing + parity not yet "
-            "verified (next step)"
+            "sandbox) via ACP — BLOCKED: the harness bootstrap fails inside "
+            "just-bash (census: sessions end with zero LLM activity); needs a "
+            "bootstrap/sandbox fix before it can route"
         ),
     )
     for alias in _ALIASES:

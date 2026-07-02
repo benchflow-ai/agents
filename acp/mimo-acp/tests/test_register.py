@@ -80,8 +80,14 @@ def test_launch_writes_proxy_provider_in_proxy_mode() -> None:
     assert '"openai"' in body and "@ai-sdk/openai-compatible" in body
     assert "BenchFlow Proxy" in body
     # the built-in openai provider auto-activates from OPENAI_* env and would
-    # collide with the redefine, so the launcher unsets them before exec
+    # collide with the redefine, so the launcher unsets them before exec —
+    # but ONLY in proxy mode: in direct-provider mode (no alias) OPENAI_* IS
+    # the provider config and must survive (the old unconditional unset broke
+    # every direct run).
+    assert 'if [ -n "$A" ]; then' in body
     assert "unset OPENAI_BASE_URL OPENAI_API_KEY" in body
+    # and the launcher never hard-exits on direct mode (no alias):
+    assert "exit 78" not in body
     # the model id baked into the config is openai/<alias>
     assert "openai/$A" in body or '"model": "openai/' in body
 
