@@ -5,12 +5,17 @@ from pathlib import Path
 from ai_sdk_harness.register import _install_cmd, _launch_cmd, register
 from benchflow.agents.registry import resolve_agent
 
-_SERVER = (Path(__file__).parents[1] / "src" / "ai_sdk_harness" / "server.mjs").read_text()
+_SERVER = (
+    Path(__file__).parents[1] / "src" / "ai_sdk_harness" / "server.mjs"
+).read_text()
 
 
 def test_register_wires_harness_agent() -> None:
     register()
-    cfg = resolve_agent("ai-sdk-harness")
+    cfg = resolve_agent("ai-sdk-pi")
+    # the historical canonical name + the other alias keep resolving
+    assert resolve_agent("ai-sdk-harness").name == "ai-sdk-pi"
+    assert resolve_agent("pi-harness").name == "ai-sdk-pi"
     assert cfg.protocol == "acp"
     assert cfg.api_protocol == "openai-completions"
     # Pi's openrouter slot (chat-completions) is fed the provider base/key.

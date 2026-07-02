@@ -46,7 +46,7 @@ ACP `PromptResult.usage`), so `result.json` reports real token counts.
 
 ```python
 from ai_sdk_harness.register import register
-register()  # adds "ai-sdk-harness" (aliases: ai-sdk-pi, pi-harness)
+register()  # adds "ai-sdk-pi" (aliases: ai-sdk-harness, pi-harness)
 
 import asyncio
 from benchflow.runtime import run, Agent, Environment, RuntimeConfig
@@ -54,7 +54,7 @@ from benchflow.runtime import run, Agent, Environment, RuntimeConfig
 async def main():
     env = Environment.from_task("path/to/task", sandbox="daytona")
     cfg = RuntimeConfig(usage_tracking="off")          # <-- required (see above)
-    res = await run(Agent("ai-sdk-harness", "deepseek/deepseek-v4-flash"), env, cfg)
+    res = await run(Agent("ai-sdk-pi", "deepseek/deepseek-v4-flash"), env, cfg)
     print(res.rollout_dir)
 
 asyncio.run(main())
