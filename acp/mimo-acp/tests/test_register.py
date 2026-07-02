@@ -32,7 +32,7 @@ def test_install_pins_mimo_cli_no_server_mjs() -> None:
     # Pinned npm package — reproducible (an unpinned float can break ACP).
     # Standardized at @0.1.1 across the agents-repo MiMo packages (the
     # live-validated current release; benchflow-core #679 pins @0.1.0).
-    assert "@mimo-ai/cli@0.1.1" in cmd
+    assert "@mimo-ai/cli@0.1.4" in cmd
     # Installs through BenchFlow's isolated node prefix, not the task image's.
     assert "/opt/benchflow" in cmd
     # mimo is a native ACP server: this package must NOT ship/deploy a server.mjs.
