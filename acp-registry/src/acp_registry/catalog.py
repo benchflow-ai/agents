@@ -266,9 +266,12 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
         },
         launch_env={
             "GOOSE_PROVIDER": "openai",
-            # goose's openai provider takes a host + base path (not one URL); the
-            # gateway/provider base URL is the host, the OpenAI path is constant.
-            "OPENAI_HOST": "$BENCHFLOW_PROVIDER_BASE_URL",
+            # goose's openai provider takes a host + base path (not one URL). The
+            # provider base may or may not carry a trailing /v1 (the LiteLLM
+            # proxy's does) — strip it, since OPENAI_BASE_PATH re-adds v1/;
+            # otherwise goose posts to /v1/v1/chat/completions (silent 404s,
+            # zero LLM calls).
+            "OPENAI_HOST": "${BENCHFLOW_PROVIDER_BASE_URL%/v1}",
             "OPENAI_BASE_PATH": "v1/chat/completions",
         },
         model_via="env",
@@ -278,7 +281,7 @@ ACP_AGENTS: tuple[AcpAgent, ...] = (
             "— agent didn't solve it with deepseek-v4-flash, not an integration "
             "failure)",
         ),
-        known_issue="OPENAI_HOST is set to the provider base URL and OPENAI_BASE_PATH "
+        known_issue="OPENAI_HOST is the provider base URL with a trailing /v1 stripped, and OPENAI_BASE_PATH "
         "to a constant v1/chat/completions — correct for a host-only base URL "
         "(DeepSeek, the LiteLLM gateway). A provider whose base URL already carries "
         "a path would double it up; such providers need the custom_providers JSON "
