@@ -89,7 +89,9 @@ class AcpAgent:
     launch_env: dict[str, str] = field(default_factory=dict)  # constant env
     acp_model_format: str = "bare"
     supports_acp_set_model: bool = False
-    model_via: str = ""  # "env" | "flag" | "config-file" | "set_model" | "config-option"
+    model_via: str = (
+        ""  # "env" | "flag" | "config-file" | "set_model" | "config-option"
+    )
     bin_name: str = ""  # npm bin name (npx install/launch); "" if N/A
     npm_extra: tuple[str, ...] = ()  # extra npm pkgs to install beside an npx agent
     #   (e.g. a provider SDK the agent imports lazily — deepagents needs @langchain/openai)
