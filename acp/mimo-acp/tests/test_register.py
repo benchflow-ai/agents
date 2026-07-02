@@ -104,3 +104,5 @@ def test_env_mapping_routes_openai_compatible() -> None:
 def test_alias_resolves_to_mimo() -> None:
     register()
     assert resolve_agent("mimo-code").name == "mimo"
+    # the historical package/manifest name keeps resolving forever
+    assert resolve_agent("mimo-acp").name == "mimo"

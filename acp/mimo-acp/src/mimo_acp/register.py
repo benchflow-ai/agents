@@ -64,7 +64,7 @@ _MIMO_PKG = "@mimo-ai/cli@0.1.4"  # pinned: an unpinned float can break ACP on u
 # core's `mimo` pin. (The old core pin @0.1.0 was unpublished from npm — `npm
 # error notarget`; 0.1.1 still exists but is stale.)
 _MIMO_BIN = f"{_PREFIX}/node_modules/@mimo-ai/cli/bin/mimo"
-_ALIASES = ("mimo-code",)
+_ALIASES = ("mimo-acp", "mimo-code")
 
 
 def _install_cmd() -> str:
