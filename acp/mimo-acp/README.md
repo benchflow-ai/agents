@@ -66,7 +66,7 @@ would then collide with this redefine (a silent zero-token turn), the launcher
   gateway URL/key in `OPENAI_BASE_URL`/`OPENAI_API_KEY` (the same
   OpenAI-compatible contract as [`ai-sdk/acp`](../ai-sdk/acp/)).
 - `install_cmd` bootstraps BenchFlow's isolated Node and `npm install`s the
-  pinned `@mimo-ai/cli@0.1.1` into `/opt/benchflow/js-agents/mimo-acp`.
+  pinned `@mimo-ai/cli@0.1.4` into `/opt/benchflow/js-agents/mimo-acp`.
 - `launch_cmd` writes the proxy `mimocode.json` (custom `openai` provider →
   `$OPENAI_BASE_URL`, models keyed by `$BENCHFLOW_LITELLM_MODEL_ALIAS`), unsets
   the colliding `OPENAI_*` env, then `exec`s `node …/@mimo-ai/cli/bin/mimo acp`.
