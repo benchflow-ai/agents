@@ -108,6 +108,7 @@ import shlex
 from benchflow.agents.registry import (
     _BENCHFLOW_NODE_PREFIX,
     _NODE_INSTALL,
+    SubscriptionAuth,
     register_agent,
 )
 
@@ -326,6 +327,20 @@ def register():
             env_mapping=dict(_ENV_MAPPING),
             # Gateway URL/key resolved from the provider at runtime.
             requires_env=[],
+            # The claude harnesses run the Claude Code CLI, which takes
+            # OAuth/subscription auth natively (CLAUDE_CODE_OAUTH_TOKEN or a
+            # host `claude login`). Declaring it opts these agents into core's
+            # Harbor-style subscription split: no API key → skip the LiteLLM
+            # proxy and let the CLI authenticate itself (runnable tier — ACP
+            # trajectory only, no llm_trajectory).
+            subscription_auth=(
+                SubscriptionAuth(
+                    replaces_env="ANTHROPIC_API_KEY",
+                    detect_file="~/.claude/.credentials.json",
+                )
+                if value in ("claude-sdk", "claude-native")
+                else None
+            ),
         )
         # Non-ACP field — set after construction so the core AgentConfig schema
         # change stays minimal (one optional field; see benchflow registry.py).
