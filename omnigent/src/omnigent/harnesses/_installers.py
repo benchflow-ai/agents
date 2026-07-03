@@ -37,3 +37,17 @@ INSTALL_CODEX = (
     'if [ -n "$CODEX_BIN" ] && [ -x "$CODEX_BIN" ]; then ln -sf "$CODEX_BIN" /usr/local/bin/codex; fi; '
     "which codex"
 )
+
+# The Qwen Code CLI (@qwen-code/qwen-code) — used by qwen + qwen-native. Same
+# install-and-symlink pattern as INSTALL_CLAUDE/CODEX. The bare `qwen` binary is
+# the OpenAI-compatible Qwen Code agent; omnigent's openai provider (the gateway)
+# is applied to it via config.yaml, so no vendor key is needed. Pinned to the
+# same version the standalone qwen-code ACP agent verifies green on.
+INSTALL_QWEN = (
+    "; "
+    f"{_BENCHFLOW_NODE_PREFIX}/bin/npm install -g @qwen-code/qwen-code@0.18.0; "
+    f'QWEN_BIN="{_BENCHFLOW_NODE_PREFIX}/bin/qwen"; '
+    'if [ ! -x "$QWEN_BIN" ]; then QWEN_BIN="$(command -v qwen || true)"; fi; '
+    'if [ -n "$QWEN_BIN" ] && [ -x "$QWEN_BIN" ]; then ln -sf "$QWEN_BIN" /usr/local/bin/qwen; fi; '
+    "which qwen"
+)
