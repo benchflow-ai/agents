@@ -32,6 +32,7 @@ normalized to end with ``/v1``. The model is forwarded to ``omnigent run
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import shlex
@@ -217,36 +218,89 @@ class OmnigentAgent:
         # default when the kernel did not resolve a cwd (older core / unit tests).
         agent_cwd = _read("BENCHFLOW_AGENT_CWD") or None
 
-        config_yaml = _build_config_yaml(
-            base_url=base_url, api_key=api_key, model=model
+        # Native Claude subscription auth (core's Harbor-style split skipped the
+        # LiteLLM proxy, so no gateway env arrives): don't write a provider —
+        # an empty-URL gateway block would set blank ANTHROPIC_BASE_URL on the
+        # harness and break the CLI. With no provider config the claude harness
+        # stays on its native vendor auth, and the OAuth token is exported into
+        # the per-turn ``omnigent run`` env by OmnigentSession.
+        oauth_token = _read("CLAUDE_CODE_OAUTH_TOKEN")
+        native_claude_auth = (
+            not base_url
+            and bool(oauth_token)
+            and self._harness in ("claude-sdk", "claude-native")
         )
 
-        home = _home_for_user(self._exec_user)
-        config_path = f"{home}/.omnigent/config.yaml"
+        if native_claude_auth:
+            logger.info(
+                "Omnigent: native Claude OAuth mode (no gateway) — skipping "
+                "credential store; harness=%r role=%r user=%r",
+                self._harness,
+                role,
+                self._exec_user,
+            )
+            # Seed the Claude CLI's native credential store with the OAuth
+            # token. This is the only auth path that reliably reaches the CLI
+            # through the omnigent chain: env vars die at the CLI→daemon hop
+            # (upstream _LOCAL_DAEMON_ENV_ALLOWLIST omits CLAUDE_CODE_OAUTH_TOKEN
+            # even though the daemon→runner HARNESS_CREDENTIAL_ENV_VARS forwards
+            # it), while a file in $HOME survives every hop. Verified live:
+            # seeded credentials.json → `omnigent run --harness claude-sdk -p`
+            # answers on daytona.
+            # ponytail: expiresAt is a far-future stamp and refreshToken is
+            # empty — the CLI accepts the access token as-is; revisit if the
+            # CLI starts enforcing refresh on long runs.
+            creds = json.dumps(
+                {
+                    "claudeAiOauth": {
+                        "accessToken": oauth_token,
+                        "refreshToken": "",
+                        "expiresAt": 9999999999999,
+                        "scopes": ["user:inference", "user:profile"],
+                        "subscriptionType": "max",
+                    }
+                }
+            )
+            creds_b64 = base64.b64encode(creds.encode("utf-8")).decode("ascii")
+            await sandbox.exec(
+                'mkdir -p "$HOME/.claude" && '
+                f"printf %s {shlex.quote(creds_b64)} | base64 -d "
+                '> "$HOME/.claude/.credentials.json" && '
+                'chmod 600 "$HOME/.claude/.credentials.json"',
+                user=self._exec_user,
+                timeout_sec=30,
+            )
+        else:
+            config_yaml = _build_config_yaml(
+                base_url=base_url, api_key=api_key, model=model
+            )
 
-        # Write the credential store via `exec` (base64-decoded) rather than a
-        # sandbox.write_file helper: the concrete sandboxes (DaytonaSandbox etc.)
-        # expose `exec`/`upload_file` but not a uniform `write_file`, and a
-        # base64 pipe is content-agnostic (the YAML carries an API key, quotes,
-        # newlines). mkdir as the exec user so ownership is correct for the
-        # daemon-spawned runner.
-        b64 = base64.b64encode(config_yaml.encode("utf-8")).decode("ascii")
-        await sandbox.exec(
-            f"mkdir -p {shlex.quote(home + '/.omnigent')} && "
-            f"printf %s {shlex.quote(b64)} | base64 -d > {shlex.quote(config_path)}",
-            user=self._exec_user,
-            timeout_sec=30,
-        )
+            home = _home_for_user(self._exec_user)
+            config_path = f"{home}/.omnigent/config.yaml"
 
-        logger.info(
-            "Omnigent: wrote credential store to %s (model=%r, base_url=%r) "
-            "for role=%r as user=%r",
-            config_path,
-            model,
-            base_url,
-            role,
-            self._exec_user,
-        )
+            # Write the credential store via `exec` (base64-decoded) rather than a
+            # sandbox.write_file helper: the concrete sandboxes (DaytonaSandbox etc.)
+            # expose `exec`/`upload_file` but not a uniform `write_file`, and a
+            # base64 pipe is content-agnostic (the YAML carries an API key, quotes,
+            # newlines). mkdir as the exec user so ownership is correct for the
+            # daemon-spawned runner.
+            b64 = base64.b64encode(config_yaml.encode("utf-8")).decode("ascii")
+            await sandbox.exec(
+                f"mkdir -p {shlex.quote(home + '/.omnigent')} && "
+                f"printf %s {shlex.quote(b64)} | base64 -d > {shlex.quote(config_path)}",
+                user=self._exec_user,
+                timeout_sec=30,
+            )
+
+            logger.info(
+                "Omnigent: wrote credential store to %s (model=%r, base_url=%r) "
+                "for role=%r as user=%r",
+                config_path,
+                model,
+                base_url,
+                role,
+                self._exec_user,
+            )
 
         # Every harness routes through the one config.yaml provider written
         # above; omnigent's runner resolves each to its family and sets the
@@ -258,6 +312,7 @@ class OmnigentAgent:
             exec_user=self._exec_user,
             harness=self._harness,
             cwd=agent_cwd,
+            oauth_token=oauth_token if native_claude_auth else None,
         )
 
 

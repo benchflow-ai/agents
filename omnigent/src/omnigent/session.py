@@ -167,12 +167,17 @@ class OmnigentSession:
         exec_user: str = "root",
         harness: str = "pi",
         cwd: str | None = None,
+        oauth_token: str | None = None,
     ) -> None:
         self._sandbox = sandbox
         self._model = model
         self._exec_user = exec_user
         # Canonical ``omnigent --harness`` value baked into each per-turn run.
         self._harness = harness
+        # Native Claude subscription auth: exported as CLAUDE_CODE_OAUTH_TOKEN
+        # into each ``omnigent run`` turn so the Claude CLI authenticates itself
+        # (set by OmnigentAgent.connect only in native-OAuth mode, else None).
+        self._oauth_token = oauth_token
         # Where ``omnigent run`` executes. The kernel resolves the per-rollout
         # workspace and plumbs it through (BENCHFLOW_AGENT_CWD → OmnigentAgent →
         # here); falls back to ``_WORKSPACE`` when unset so direct construction /
@@ -209,7 +214,21 @@ class OmnigentSession:
         # runner routes every harness through the config.yaml gateway provider
         # written at connect() time, so no per-harness env is needed here.
         model_flag = f"--model {shlex.quote(model)} " if model else ""
+        # OMNIGENT_CLAUDE_SDK_NO_SANDBOX: omnigent's inner bwrap wrap prunes the
+        # spawn env to a no-credentials allowlist (os_env._DEFAULT_ENV_PASSTHROUGH),
+        # which strips CLAUDE_CODE_OAUTH_TOKEN before the Claude CLI spawns
+        # ("Not logged in"). The BenchFlow sandbox is already the isolation
+        # boundary, so use upstream's documented bypass in OAuth mode.
+        # ponytail: env-var bypass; upgrade path is an OSEnvSandboxSpec with
+        # env_passthrough=[CLAUDE_CODE_OAUTH_TOKEN] if the inner wrap matters.
+        oauth_prefix = (
+            f"export CLAUDE_CODE_OAUTH_TOKEN={shlex.quote(self._oauth_token)}; "
+            "export OMNIGENT_CLAUDE_SDK_NO_SANDBOX=1; "
+            if self._oauth_token
+            else ""
+        )
         cmd = (
+            f"{oauth_prefix}"
             f"cd {shlex.quote(self._cwd)} && "
             f"omnigent stop >/dev/null 2>&1; "
             f"omnigent run --harness {shlex.quote(self._harness)} "
