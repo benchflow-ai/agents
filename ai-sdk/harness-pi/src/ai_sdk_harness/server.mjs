@@ -29,10 +29,18 @@ let modelId = process.env.BENCHFLOW_PROVIDER_MODEL || "";
 let harnessSession = null, sessionDir = null, currentAbort = null, cachedAgent = null;
 
 const isPiDir = (n) => /^pi-/.test(n);
+// The daytona sandbox drops a root-owned ".daytona" session-bookkeeping dir
+// inside the workspace; recursing into it as the (non-root) agent user throws
+// EACCES and aborts the whole seed before any turn runs. It is never task
+// content, so skip it — and copy each remaining entry independently so one
+// unreadable file can't take down the seed either.
+const isSkip = (n) => isPiDir(n) || n === ".daytona";
 const seedIntoSession = () => {                       // task files -> session dir
   for (const e of readdirSync(agentCwd, { withFileTypes: true })) {
-    if (isPiDir(e.name) || e.isSymbolicLink()) continue;  // skip pi dirs + the abs-path symlink (itself a symlink)
-    cpSync(join(agentCwd, e.name), join(sessionDir, e.name), { recursive: true });
+    if (isSkip(e.name) || e.isSymbolicLink()) continue;  // skip pi/daytona dirs + the abs-path symlink
+    try {
+      cpSync(join(agentCwd, e.name), join(sessionDir, e.name), { recursive: true });
+    } catch (err) { log("seed skip:", e.name, String(err)); }
   }
 };
 const syncBackToCwd = () => {                          // agent results -> task cwd
@@ -49,7 +57,14 @@ async function ensureSession() {
   const key = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY || "";
   log(`init: model=${modelId} base=${base} keylen=${key.length}`);  // stderr only — never into the trajectory
   const harness = createPi({ auth: { customEnv: { OPENROUTER_API_KEY: key, OPENROUTER_BASE_URL: base } }, model: modelId });
-  const sb = await Sandbox.create({ fs: new ReadWriteFs({ root: agentCwd, allowSymlinks: true }), cwd: "/" });
+  // defenseInDepth:false disables just-bash's in-process JS-escape guard, which
+  // otherwise blocks the pi harness's `import('node:module')` (pi-workspace-vfs
+  // calls syncBuiltinESMExports) with a "security violation" and ends the run
+  // with zero LLM activity. The guard is a documented SECONDARY layer ("never
+  // rely upon as the primary security mechanism"); the benchflow task container
+  // is the real isolation boundary, so disabling this in-process monkey-patch is
+  // safe here and is the sole thing standing between install and a live turn.
+  const sb = await Sandbox.create({ fs: new ReadWriteFs({ root: agentCwd, allowSymlinks: true }), cwd: "/", defenseInDepth: false });
   cachedAgent = new HarnessAgent({ harness, sandbox: createJustBashSandbox({ sandbox: sb }) });
   harnessSession = await cachedAgent.createSession();
   sessionDir = join(agentCwd, `pi-${harnessSession.sessionId}`);
