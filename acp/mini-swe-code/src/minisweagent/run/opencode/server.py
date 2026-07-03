@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -314,15 +315,29 @@ def main() -> None:
     if not _wait_healthy(url):
         print("server failed to start", flush=True)
         return
-    # Resolve how to launch the TUI. Prefer the vendored standalone binary (self-contained —
-    # no external opencode repo needed); OPENCODE_CMD overrides; else a global `opencode`.
+    # Resolve how to launch the TUI. OPENCODE_CMD overrides; else a locally
+    # built binary at bin/opencode (fetched/built on demand — not committed,
+    # see docs/usage/opencode_tui.md); else a global `opencode` on PATH.
     vendored = Path(__file__).resolve().parent / "bin" / "opencode"
     if os.getenv("OPENCODE_CMD"):
         opencode_cmd = shlex.split(os.environ["OPENCODE_CMD"])
     elif vendored.exists():
         opencode_cmd = [str(vendored)]
-    else:
+    elif shutil.which("opencode"):
         opencode_cmd = ["opencode"]
+    else:
+        print(
+            "opencode TUI not found. Provide one of:\n"
+            f"  - a built binary at {vendored} (see docs/usage/opencode_tui.md),\n"
+            "  - OPENCODE_CMD pointing at a dev build, or\n"
+            "  - `opencode` on your PATH (https://opencode.ai).\n"
+            "The server is running; attach a TUI yourself with:\n"
+            f"  opencode attach {url}",
+            flush=True,
+        )
+        server.should_exit = True
+        thread.join(timeout=5)
+        return
     # The dev TUI (`bun .../packages/opencode/src/index.ts`) must launch from the opencode
     # package dir so bun loads its tsconfig (jsxImportSource=@opentui/solid). Infer it.
     attach_cwd = args.opencode_dir

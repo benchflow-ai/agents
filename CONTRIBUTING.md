@@ -157,7 +157,10 @@ ruff-format, typos) locally.
   (force-added upstream). If you ever re-add the tree wholesale, use
   `git add -f` for those two or two end-to-end tests fail with
   `FileNotFoundError`.
-- The bundled opencode TUI binary
-  (`acp/mini-swe-code/src/minisweagent/run/opencode/bin/opencode`, ~82 MB,
-  macOS arm64) is committed as a normal blob. Rebuild recipe:
+- The opencode TUI binary
+  (`acp/mini-swe-code/src/minisweagent/run/opencode/bin/opencode`, ~82 MB) is
+  **not committed** — it is gitignored and built on demand (a repo of install
+  commands and patches has no business shipping a platform binary). Build it
+  for your platform, point `OPENCODE_CMD` at a dev build, or use a global
+  `opencode`; a local wheel still bundles a built copy. Recipe:
   [docs/usage/opencode_tui.md](acp/mini-swe-code/docs/usage/opencode_tui.md).
