@@ -186,3 +186,7 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 
+
+# Prebuilt opencode TUI binary — platform-specific (~82MB); fetch/build on demand,
+# do not commit (see docs/usage/opencode_tui.md).
+src/minisweagent/run/opencode/bin/opencode

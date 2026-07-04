@@ -4,11 +4,11 @@
 
     * `mini-opencode` runs mini-SWE-agent behind [opencode](https://opencode.ai)'s terminal UI.
     * A small Python server speaks opencode's HTTP+SSE protocol with mini-SWE-agent as the backend; the real opencode TUI attaches to it and renders each agent step as native messages and tool calls.
-    * This fork ships a **self-contained, prebuilt TUI binary**, so no external opencode repository or `bun` is required at runtime.
+    * The TUI binary is **not committed** (it is a large, platform-specific blob). Build it once with the recipe below, point `OPENCODE_CMD` at a dev build, or use a global `opencode` on your `PATH`.
 
 !!! warning "Platform"
 
-    The bundled TUI binary is built for **macOS arm64** (`darwin-arm64`). On other platforms, rebuild it (see [Rebuilding the TUI binary](#rebuilding-the-tui-binary)).
+    Build the TUI binary for your platform (see [Building the TUI binary](#building-the-tui-binary)) — it lands at `src/minisweagent/run/opencode/bin/opencode` (gitignored) and a local wheel bundles it from there. Or skip the build and use a global `opencode`.
 
 ## Quick start
 
@@ -42,7 +42,7 @@ Pick a model, type a task, and mini-SWE-agent runs its loop — the bash command
 - `--attach`: start the server **and** launch the TUI in one process (recommended). Without it, only the server runs and you attach a TUI yourself.
 - `--cwd`: working directory the agent operates in (default: current directory).
 - `--port`: server port (default: `4747`).
-- `--opencode-dir`: directory to launch the TUI from — only needed when pointing `OPENCODE_CMD` at a dev `bun src/index.ts` TUI instead of the bundled binary.
+- `--opencode-dir`: directory to launch the TUI from — only needed when pointing `OPENCODE_CMD` at a dev `bun src/index.ts` TUI instead of a built binary.
 
 The model selected in the TUI maps to a litellm model name as `providerID/modelID` (e.g. `anthropic/claude-sonnet-4-6`).
 
@@ -51,7 +51,7 @@ The model selected in the TUI maps to a litellm model name as `providerID/modelI
 `--attach` resolves the TUI command in this order:
 
 1. `OPENCODE_CMD` if set (e.g. a dev build: `bun --conditions=browser /path/to/opencode/packages/opencode/src/index.ts`).
-2. The bundled binary at `src/minisweagent/run/opencode/bin/opencode`.
+2. A locally-built binary at `src/minisweagent/run/opencode/bin/opencode` (gitignored — see below).
 3. A global `opencode` on your `PATH`.
 
 ## Two-terminal mode
@@ -61,13 +61,13 @@ Useful for debugging — run the pieces separately:
 ```bash
 # terminal 1 — server
 mini-opencode --port 4747 --cwd /path/to/scratch/dir
-# terminal 2 — TUI (bundled binary)
+# terminal 2 — TUI (locally-built binary, or a global `opencode`)
 src/minisweagent/run/opencode/bin/opencode attach http://127.0.0.1:4747
 ```
 
 Server activity is logged to `/tmp/mini-opencode.log` (`prompt received`, `agent start`/`agent done`, errors). If no API key is set, the server prints a warning at startup and the TUI shows the auth error inside the conversation.
 
-## Rebuilding the TUI binary
+## Building the TUI binary
 
 The bundled binary is compiled from [opencode](https://github.com/anomalyco/opencode) (with mini-SWE-agent branding). To rebuild for your platform, inside the opencode repo's `packages/opencode`:
 
