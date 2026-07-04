@@ -30,7 +30,7 @@ benchflow resolves the harbor-style shorthand `<ns>:<id>` onto these names
 The **`acp-registry/`** family is different: the `acp-registry/` pip package
 catalogs every agent, and most adapting agents ship a *declarative*
 `acp/<id>/manifest.toml` instead — 38 of them, with no `server.mjs` of their own
-(a couple, like `mimo-acp`, wrap a thin shim package).
+(a couple wrap a thin shim package).
 They are classified in
 [`acp-registry/src/acp_registry/catalog.py`](acp-registry/src/acp_registry/catalog.py)
 (the live per-agent table is generated into
@@ -130,7 +130,7 @@ pytest -q
 ## CI
 
 Root `.github/workflows/` runs per-package tests (path-filtered) — including the
-`acp-registry`, `parity`, `omnigent`, `mimo-acp`, and `ai-sdk` jobs — plus ruff
+`acp-registry`, `parity`, `omnigent`, and `ai-sdk` jobs — plus ruff
 (pinned to the `.pre-commit-config.yaml` version) and a markdown
 link check on PRs. The `acp-registry` job also fails the build when `AGENTS.md` is
 stale, so regenerate it after any `catalog.py` (or snapshot) edit (see the

@@ -1,15 +1,18 @@
-# mimo-acp
+# mimo
 
 [MiMo Code](https://mimo.xiaomi.com/mimocode) (Xiaomi) as a
-[BenchFlow](https://github.com/benchflow-ai/benchflow) agent — registered
-out-of-core through the public `benchflow.register_agent` extension point.
+[BenchFlow](https://github.com/benchflow-ai/benchflow) agent — a single
+**declarative `manifest.toml`** (registered agent name: **`mimo`**; aliases
+`mimo-acp`, `mimo-code`), following the one-entry-per-agent model of the
+[ACP registry](https://agentclientprotocol.com/get-started/registry). No adapter
+code: the manifest is pure data, loaded via `BENCHFLOW_AGENTS_DIR` or
+benchflow's manifest auto-load.
 
 MiMo Code is an **OpenCode fork** whose `mimo` CLI ships a **native** ACP
-server (`mimo acp`, JSON-RPC over stdio). So — unlike the `ai-sdk/harness-*`
-packages, which implement the ACP server in a JS `server.mjs` wrapping a Vercel
-AI SDK agent — this package ships **no** `server.mjs`: `mimo acp` *is* the
-server. Structurally it mirrors [`mini-swe-acp`](../mini-swe-acp/) (a native
-agent registered out-of-core), minus the custom Python ACP shim.
+server (`mimo acp`, JSON-RPC over stdio) — the agent *is* the ACP server, so
+the manifest's launcher just configures provider routing and execs `mimo acp`.
+(A python package flavor of this adapter and benchflow-core's `mimo-proxy`
+wrapper flavor were consolidated into this single manifest — see PR #47.)
 
 ```
 benchflow eval  ──ACP/stdio──▶  mimo acp   (native server, npm @mimo-ai/cli)
