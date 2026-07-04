@@ -127,10 +127,18 @@ def test_status_values_are_from_the_known_vocabulary() -> None:
 
 
 def test_only_cli_harnesses_carry_an_install_snippet() -> None:
-    """Only the codex/claude families auto-install a vendor CLI; every other
-    harness relies on the base install (pi / bundled SDK) or is needs-vendor."""
+    """Only the CLI families that our gateway provider can drive auto-install a
+    vendor CLI (claude/codex families + qwen, all OpenAI/Anthropic-compatible on
+    the gateway); every other harness relies on the base install (pi / bundled
+    SDK) or is a needs-vendor CLI we do not provision."""
     with_install = {s.slug for s in HARNESS_SPECS if s.install}
-    assert with_install == {"claude", "claude-native", "codex", "codex-native"}
+    assert with_install == {
+        "claude",
+        "claude-native",
+        "codex",
+        "codex-native",
+        "qwen",
+    }
 
 
 def test_by_slug_lookup_is_complete() -> None:

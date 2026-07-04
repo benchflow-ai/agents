@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from omnigent.harnesses._installers import INSTALL_QWEN
 from omnigent.harnesses._spec import HarnessSpec
 
 SPEC = HarnessSpec(
@@ -13,8 +14,8 @@ SPEC = HarnessSpec(
     status="wip",
     note=(
         "Alibaba Qwen Code CLI (OpenAI-compatible wire); our openai "
-        "provider IS applied, but the qwen CLI is not auto-installed — "
-        "install it to launch."
+        "provider IS applied, and the qwen CLI is now auto-installed "
+        "(@qwen-code/qwen-code) so it launches on the gateway."
     ),
-    install=None,
+    install=INSTALL_QWEN,
 )
