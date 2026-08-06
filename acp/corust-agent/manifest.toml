@@ -5,7 +5,6 @@ install_cmd = '''set -e; export DEBIAN_FRONTEND=noninteractive; ( command -v cur
 launch_cmd = '''set -e; export CORUST_HOME="${CORUST_HOME:-$HOME/.corust-agent-bf}"; mkdir -p "$CORUST_HOME"; export CORUST_API_KEY="${CORUST_API_KEY:-bf-placeholder}"; exec /opt/benchflow/acp/corust-agent/corust-agent-acp'''
 protocol = "acp"
 api_protocol = "openai-completions"
-acp_model_format = "prefixed"
 supports_acp_set_model = false
 aliases = ["corust", "corust-agent"]
 
