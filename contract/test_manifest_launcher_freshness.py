@@ -1,15 +1,26 @@
-"""Freshness test: the pi-acp manifest's embedded launcher must track core.
+"""Freshness tests: base64-embedded launchers must track their source of truth.
 
-agents#17 hand-embedded the *pre-#831* ``pi_acp_launcher.py`` into
-``acp/pi-acp/manifest.toml``. That launcher hardcoded ``_DEFAULT_MAX_TOKENS = 16384``
-— the #829 bug: some OpenAI-compatible providers reject a 16k ``max_tokens`` and
-the agent falls into a retry storm. benchflow#831 hardened core to cap the
-fallback completion budget at 4096 (1/4 of the context window, whichever is
-smaller) via ``_default_max_tokens()`` / ``_positive_int()``.
+Two drift hazards, one per section below:
 
-The decoupled path (``BENCHFLOW_AGENTS_DIR``) runs the *manifest's* embedded
-launcher, not core — so a stale manifest silently reintroduces #829. This test
-extracts that embedded launcher and pins its token behaviour to post-#831 core.
+1. pi-acp — its launcher's source of truth lives in benchflow *core*
+   (``pi_acp_launcher.py``), so the embed can only be pinned semantically.
+   agents#17 hand-embedded the *pre-#831* launcher into
+   ``acp/pi-acp/manifest.toml``. That launcher hardcoded
+   ``_DEFAULT_MAX_TOKENS = 16384`` — the #829 bug: some OpenAI-compatible
+   providers reject a 16k ``max_tokens`` and the agent falls into a retry
+   storm. benchflow#831 hardened core to cap the fallback completion budget at
+   4096 (1/4 of the context window, whichever is smaller) via
+   ``_default_max_tokens()`` / ``_positive_int()``. The decoupled path
+   (``BENCHFLOW_AGENTS_DIR``) runs the *manifest's* embedded launcher, not
+   core — so a stale manifest silently reintroduces #829. These tests extract
+   the embedded launcher and pin its token behaviour to post-#831 core.
+
+2. Sibling-source launchers (prime-agent, agents#62, and any future agent
+   using the pattern) — the plaintext launcher is committed next to the
+   manifest (``acp/<name>/launcher.sh``) and embedded as base64 in
+   ``install_cmd``. The embed is what actually runs in the sandbox; the
+   sibling file is what humans review and edit. A byte-compare pins them
+   together: editing one without regenerating the other fails here.
 
 Run: PYTHONPATH=. pytest test_manifest_launcher_freshness.py
 """
@@ -20,6 +31,9 @@ import base64
 import re
 import types
 from pathlib import Path
+
+import pytest
+import tomllib
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST = _REPO_ROOT / "acp" / "pi-acp" / "manifest.toml"
@@ -96,3 +110,31 @@ def test_embedded_positive_int_matches_core_contract() -> None:
     assert mod._positive_int(10.5) is None
     assert mod._positive_int(True) is None  # bool is not an int budget
     assert mod._positive_int("nope") is None
+
+
+# ── sibling-source launchers: embed must equal the committed file, byte for byte ──
+
+_LAUNCHER_SOURCES = sorted(_REPO_ROOT.glob("acp/*/launcher.sh"))
+
+# any `echo <BLOB> | base64 -d` (or --decode) stanza inside install_cmd
+_ANY_BLOB_RE = re.compile(
+    r"\becho\s+([A-Za-z0-9+/=]+)\s*\|\s*base64\s+(?:-d|--decode)\b"
+)
+
+
+@pytest.mark.parametrize("launcher", _LAUNCHER_SOURCES, ids=lambda p: p.parent.name)
+def test_embedded_blob_matches_sibling_launcher_source(launcher: Path) -> None:
+    manifest = launcher.parent / "manifest.toml"
+    assert manifest.is_file(), f"{launcher}: sibling manifest.toml missing"
+    install_cmd = tomllib.loads(manifest.read_text())["install_cmd"]
+    blobs = _ANY_BLOB_RE.findall(install_cmd)
+    assert blobs, (
+        f"{manifest}: install_cmd embeds no base64 launcher blob, but "
+        f"{launcher.name} exists — embed it or delete the orphaned source file"
+    )
+    expected = launcher.read_bytes()
+    assert any(base64.b64decode(blob) == expected for blob in blobs), (
+        f"{manifest}: no base64 blob in install_cmd decodes to the committed "
+        f"{launcher.name} — the embed and the source have drifted. Regenerate "
+        "with: base64 < launcher.sh | tr -d '\\n' and replace the blob."
+    )
