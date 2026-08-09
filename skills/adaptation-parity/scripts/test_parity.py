@@ -344,11 +344,58 @@ def test_neutral_diff_allowlist_is_explicit() -> None:
     for rule in (
         "gateway-model-alias",
         "sandbox-cwd",
+        "skill-location-install-prefix",
         "prompt-trailing-whitespace",
         "assistant-content-null-vs-omitted",
         "wrote-N-bytes",
+        "single-text-part-vs-string",
+        "blank-reasoning-content",
     ):
         assert rule in NEUTRAL_DIFFS
+
+
+def test_single_text_part_collapses_but_text_and_multipart_still_differ() -> None:
+    part = lambda t: [{"type": "text", "text": t}]  # noqa: E731
+    expected = [{"model": "m", "messages": [{"role": "user", "content": part("hi")}]}]
+    same = [{"model": "m", "messages": [{"role": "user", "content": "hi"}]}]
+    changed = [{"model": "m", "messages": [{"role": "user", "content": "hi!"}]}]
+    multi = [{"model": "m", "messages": [{"role": "user", "content": part("hi") + [{"type": "image_url", "image_url": {}}]}]}]
+    assert compare_captures(expected, same).ok
+    assert not compare_captures(expected, changed).ok
+    assert not compare_captures(expected, multi).ok
+
+
+def test_blank_reasoning_content_collapses_but_real_reasoning_differs() -> None:
+    def msg(rc: str) -> list[dict]:
+        return [{"role": "assistant", "content": "x", "reasoning_content": rc}]
+
+    expected = [{"model": "m", "messages": msg("")}]
+    padded = [{"model": "m", "messages": msg(" ")}]
+    real = [{"model": "m", "messages": msg("thinking...")}]
+    assert compare_captures(expected, padded).ok
+    assert not compare_captures(expected, real).ok
+
+
+def test_skill_location_install_prefix_collapses_but_names_still_differ() -> None:
+    """The bundled-skill <location> install prefix is environment placement
+    (host npm prefix vs /opt/benchflow) and collapses to <PKG>; a different
+    skill NAME — or an extra entry — is a real divergence and still FAILs."""
+
+    def sysmsg(prefix: str, names: list[str]) -> list[dict]:
+        locs = "\n".join(
+            f"    <location>{prefix}/dist/skills/{n}/SKILL.md</location>"
+            for n in names
+        )
+        return [{"role": "system", "content": f"Skills:\n{locs}"}]
+
+    expected = [{"model": "m", "messages": sysmsg("/Users/me/npm/prime-agent", ["edit", "goal"])}]
+    same = [{"model": "m", "messages": sysmsg("/opt/benchflow/js-agents/lib/node_modules/prime-agent", ["edit", "goal"])}]
+    renamed = [{"model": "m", "messages": sysmsg("/opt/benchflow/js-agents/lib/node_modules/prime-agent", ["edit", "websearch"])}]
+    extra = [{"model": "m", "messages": sysmsg("/opt/benchflow/js-agents/lib/node_modules/prime-agent", ["edit", "goal", "extra"])}]
+
+    assert compare_captures(expected, same).ok
+    assert not compare_captures(expected, renamed).ok
+    assert not compare_captures(expected, extra).ok
 
 
 # ── wire-parity comparison: real divergences must FAIL ──
