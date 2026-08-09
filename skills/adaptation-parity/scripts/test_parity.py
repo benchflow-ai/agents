@@ -348,8 +348,32 @@ def test_neutral_diff_allowlist_is_explicit() -> None:
         "prompt-trailing-whitespace",
         "assistant-content-null-vs-omitted",
         "wrote-N-bytes",
+        "single-text-part-vs-string",
+        "blank-reasoning-content",
     ):
         assert rule in NEUTRAL_DIFFS
+
+
+def test_single_text_part_collapses_but_text_and_multipart_still_differ() -> None:
+    part = lambda t: [{"type": "text", "text": t}]  # noqa: E731
+    expected = [{"model": "m", "messages": [{"role": "user", "content": part("hi")}]}]
+    same = [{"model": "m", "messages": [{"role": "user", "content": "hi"}]}]
+    changed = [{"model": "m", "messages": [{"role": "user", "content": "hi!"}]}]
+    multi = [{"model": "m", "messages": [{"role": "user", "content": part("hi") + [{"type": "image_url", "image_url": {}}]}]}]
+    assert compare_captures(expected, same).ok
+    assert not compare_captures(expected, changed).ok
+    assert not compare_captures(expected, multi).ok
+
+
+def test_blank_reasoning_content_collapses_but_real_reasoning_differs() -> None:
+    def msg(rc: str) -> list[dict]:
+        return [{"role": "assistant", "content": "x", "reasoning_content": rc}]
+
+    expected = [{"model": "m", "messages": msg("")}]
+    padded = [{"model": "m", "messages": msg(" ")}]
+    real = [{"model": "m", "messages": msg("thinking...")}]
+    assert compare_captures(expected, padded).ok
+    assert not compare_captures(expected, real).ok
 
 
 def test_skill_location_install_prefix_collapses_but_names_still_differ() -> None:

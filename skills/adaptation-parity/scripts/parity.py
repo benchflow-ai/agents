@@ -153,6 +153,38 @@ def _rule_skill_location_prefix(body: dict) -> None:
             m["content"] = sub(m["content"])
 
 
+def _rule_single_text_part_content(body: dict) -> None:
+    # OpenAI-compatible APIs accept message content as either a plain string or
+    # an array of typed parts; a single {"type": "text"} part and the bare
+    # string are the same model input. LiteLLM's provider transforms flatten
+    # the array form to a string (observed on the deepseek route), so the two
+    # encodings must compare equal — while ANY difference in the text itself,
+    # or a multi-part array (images!), still differs.
+    for m in body.get("messages", []):
+        c = m.get("content")
+        if (
+            isinstance(c, list)
+            and len(c) == 1
+            and isinstance(c[0], dict)
+            and c[0].get("type") == "text"
+            and isinstance(c[0].get("text"), str)
+            and set(c[0]) == {"type", "text"}
+        ):
+            m["content"] = c[0]["text"]
+
+
+def _rule_blank_reasoning_content(body: dict) -> None:
+    # Agents replay assistant turns with an empty ``reasoning_content`` when a
+    # provider requires the field's presence (DeepSeek); LiteLLM's transform
+    # pads the empty string to a single space. Whitespace-only replayed
+    # reasoning is semantically inert either way — collapse both to "".
+    # Non-blank reasoning content is compared verbatim.
+    for m in body.get("messages", []):
+        rc = m.get("reasoning_content")
+        if isinstance(rc, str) and rc.strip() == "":
+            m["reasoning_content"] = ""
+
+
 _RULES: list[tuple[str, Callable[[dict], None]]] = [
     (
         "gateway-model-alias",
@@ -172,6 +204,14 @@ _RULES: list[tuple[str, Callable[[dict], None]]] = [
         _rule_assistant_content_null,
     ),  # LiteLLM re-aggregation
     ("wrote-N-bytes", _rule_wrote_n_bytes),  # byte count in a write tool-result
+    (
+        "single-text-part-vs-string",
+        _rule_single_text_part_content,
+    ),  # [{type:text}] array vs bare string — same model input
+    (
+        "blank-reasoning-content",
+        _rule_blank_reasoning_content,
+    ),  # "" vs " " replayed reasoning_content — LiteLLM padding
 ]
 
 #: The explicit, reviewable allowlist of expected-neutral differences. Anything

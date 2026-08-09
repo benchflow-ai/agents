@@ -54,6 +54,35 @@ byte-identical. The neutral diffs are an explicit, load-bearing allowlist
 Anything else — a changed sampling param, a reshaped tool schema, a dropped field
 the model conditions on — is a real divergence and a FAIL.
 
+## Daytona variant (no host-reachable mock)
+
+The recipe above assumes ``sandbox=docker`` (a host-side gateway reaches a mock
+on host loopback). On Daytona the gateway runs INSIDE the sandbox and cannot
+reach the host — run the mock inside the sandbox instead; the topology is
+otherwise identical:
+
+1. Build a tiny mock task whose environment ships the mock and starts it via a
+   ``[environment] setup_commands`` entry. Background it with full fd
+   detachment AND an explicit subshell — ``(nohup node mock.mjs </dev/null
+   >log 2>&1 &); sleep 1; curl -fsS -m 5 localhost:11500/health`` — chaining
+   ``cmd1 && nohup ... &`` backgrounds the whole list and wedges Daytona's
+   session exec until its timeout.
+2. Point the provider at sandbox loopback (``DEEPSEEK_BASE_URL=http://127.0.0.1:11500/v1``)
+   and run the registered agent normally (``bench eval run --sandbox daytona``).
+3. Exfiltrate the mock's ``REQ_LOG`` through the verifier: ``test.sh`` cats it
+   between markers to stdout, which lands in the downloaded
+   ``verifier/test-stdout.txt``.
+4. Annotate each side's capture lines with their own ``cwd`` and diff with
+   ``parity_diff.py`` as usual.
+
+Running this against prime-agent (2026-08-08) caught a real gateway
+divergence the log-based inside view cannot see: LiteLLM's ``drop_params``
+stripped agent-sent ``thinking``/``reasoning_effort`` on ``openai/``
+passthrough routes (fixed in benchflow by routing deepseek through its native
+LiteLLM provider + lifting ``reasoning_effort`` into ``extra_body``). The
+gateway's raw-trace log records the INCOMING request, so wire-level parity
+claims need a capture at (or beyond) the mock, not the trace log.
+
 ## Outcome parity (does it do the same thing?)
 
 Run the same task inside and standalone; compare reward, tool sequence, and files
