@@ -132,12 +132,37 @@ def _rule_wrote_n_bytes(body: dict) -> None:
             m["content"] = re.sub(r"wrote \d+ bytes", "wrote N bytes", m["content"])
 
 
+def _rule_skill_location_prefix(body: dict) -> None:
+    # Agents that list their bundled skills in the system prompt (prime-agent's
+    # <location>.../dist/skills/<name>/SKILL.md</location>) embed the agent's
+    # INSTALL PREFIX in each location. Standalone installs live under the host's
+    # npm prefix; BenchFlow installs under /opt/benchflow — same skill set,
+    # different mount point, the same environment-placement class as cwd. We
+    # collapse ONLY the prefix ahead of the dist/skills/... tail inside a
+    # <location> tag, so a genuinely different skill NAME (or an extra/missing
+    # skill entry) still differs and FAILs.
+    def sub(text: str) -> str:
+        return re.sub(
+            r"<location>/\S*?/(dist/skills/[^<]+)</location>",
+            r"<location><PKG>/\1</location>",
+            text,
+        )
+
+    for m in body.get("messages", []):
+        if m.get("role") == "system" and isinstance(m.get("content"), str):
+            m["content"] = sub(m["content"])
+
+
 _RULES: list[tuple[str, Callable[[dict], None]]] = [
     (
         "gateway-model-alias",
         _rule_model_alias,
     ),  # benchflow-<provider>- alias -> same model
     ("sandbox-cwd", _rule_sandbox_cwd),  # task cwd / sandbox /app -> <CWD>
+    (
+        "skill-location-install-prefix",
+        _rule_skill_location_prefix,
+    ),  # bundled-skill <location> install prefix -> <PKG>
     (
         "prompt-trailing-whitespace",
         _rule_prompt_trailing_ws,
