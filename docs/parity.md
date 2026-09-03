@@ -30,11 +30,18 @@ runnable-tier ACP routing/handshake smoke, and `path_wire_parity.py`, a uniform
 offline ai-sdk wire-parity check):
 
 ```bash
-node acp_capture.mjs --server <server.mjs> --out /tmp/outside.jsonl   # standalone
+node acp_capture.mjs --launch "<agent ACP command>" --out /tmp/outside.jsonl
+# Existing Node adapters may continue using: --server <server.mjs>
 # inside: run the registered agent on the same task with the gateway forwarding
 # to the same mock (DEEPSEEK_BASE_URL=http://127.0.0.1:<port>/v1, sandbox=docker)
 python parity_diff.py /tmp/outside.jsonl /tmp/inside.jsonl
 ```
+
+`--launch` runs a trusted local command with POSIX `/bin/sh -c`; `--server`
+executes a Node script directly. Mock capture supports OpenAI-compatible
+`/chat/completions` agents. It clears ambient provider variables named by this
+repo's manifest mappings before injecting mock routing. Output file is replaced
+per run; zero fresh requests is failure.
 
 `parity_diff.py` — a thin CLI over the importable
 [`parity`](../skills/adaptation-parity/scripts/parity.py) module (`assert_wire_parity` /

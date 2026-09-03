@@ -274,7 +274,7 @@ class WireParityResult:
 def compare_captures(expected: list[dict], actual: list[dict]) -> WireParityResult:
     """Compare two upstream-request captures after neutral normalization."""
     n_e, n_a = len(expected), len(actual)
-    ok = n_e == n_a
+    ok = n_e > 0 and n_a > 0 and n_e == n_a
     reqs: list[RequestComparison] = []
     for i in range(min(n_e, n_a)):
         ne, na = normalize_request(expected[i]), normalize_request(actual[i])

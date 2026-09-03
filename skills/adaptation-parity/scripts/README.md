@@ -4,9 +4,13 @@
   `/chat/completions` mock. Logs every request body to `REQ_LOG`; returns a fixed
   2-turn response (writeFile tool call → final text). Makes an agent's behavior
   deterministic so its upstream requests can be diffed.
-- **`acp_capture.mjs`** — drives an agent's ACP `server.mjs` through one prompt
+- **`acp_capture.mjs`** — drives an agent's ACP launch command (or legacy
+  `--server <server.mjs>`) through one prompt
   against the mock, and records the upstream requests + tool calls + file written.
   Use for the **standalone** half of a parity check.
+- **`acp_driver.mjs`** — shared bounded ACP client used by `acp_capture.mjs` and
+  `acp_smoke.mjs`; handles sessions, permission/fs callbacks, errors, and process
+  cleanup.
 - **`parity.py`** — the reusable, importable comparator a per-agent pytest calls:
   `assert_wire_parity(expected, actual)`, `compare_outcomes(...)`, `load_capture(path)`,
   plus the explicit `NEUTRAL_DIFFS` allowlist (load-bearing — the rule registry drives
@@ -21,6 +25,9 @@
 # 1) standalone capture
 node acp_capture.mjs --server ../../../ai-sdk/acp/src/ai_sdk_acp/server.mjs \
      --out /tmp/outside.jsonl
+# Non-Node adapter:
+node acp_capture.mjs --launch "python3 /path/to/agent-acp-shim.py" \
+     --out /tmp/outside.jsonl
 
 # 2) inside-BenchFlow capture: register the agent and run it on the SAME task,
 #    with the LiteLLM gateway forwarding to this mock — i.e. set the provider's
@@ -31,6 +38,14 @@ node acp_capture.mjs --server ../../../ai-sdk/acp/src/ai_sdk_acp/server.mjs \
 # 3) diff
 python parity_diff.py /tmp/outside.jsonl /tmp/inside.jsonl
 ```
+
+`--launch` is passed to `/bin/sh -c`; use only trusted local commands. Use
+`--server` for an argv-safe Node script path. Capture mock supports agents using
+OpenAI-compatible `/chat/completions`; inherited variables named by repo manifest
+mappings are removed, then supported OpenAI/OpenRouter/BenchFlow aliases point to
+mock. `--rpc-timeout <milliseconds>` bounds each ACP request; failures clean
+up mock plus agent process group and exit nonzero. `--out` is truncated before
+launch; success requires at least one valid request written by newly started mock.
 
 The model call is what matters for parity; `mock_upstream` removes model
 non-determinism so any post-normalization diff is a real, benchflow-introduced
