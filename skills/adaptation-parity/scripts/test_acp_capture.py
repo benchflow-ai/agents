@@ -166,10 +166,28 @@ def test_smoke_uses_shared_driver(tmp_path: Path) -> None:
     assert result["upstreamRequests"] == 1
 
 
+def test_capture_isolates_and_cleans_agent_home(tmp_path: Path) -> None:
+    """Capture must not read or mutate the caller's real agent configuration."""
+    ambient_home = tmp_path / "ambient-home"
+    ambient_home.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    proc = run(
+        probe_args(workspace),
+        HOME=str(ambient_home),
+        ACP_FIXTURE_HOME_MARKER="capture-marker",
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert not (ambient_home / "capture-marker").exists()
+
+
 def test_capture_rejects_occupied_mock_port(tmp_path: Path) -> None:
+    """Guards PR #71's occupied-port failure on IPv4 and dual-stack hosts."""
     port = free_port()
     with socket.socket() as occupied:
-        occupied.bind(("127.0.0.1", port))
+        occupied.bind(("0.0.0.0", port))
         occupied.listen()
         proc = run([*probe_args(tmp_path, port=port), "--ready-timeout", "250"])
     assert proc.returncode == 1

@@ -41,11 +41,12 @@ python parity_diff.py /tmp/outside.jsonl /tmp/inside.jsonl
 
 `--launch` is passed to `/bin/sh -c`; use only trusted local commands. Use
 `--server` for an argv-safe Node script path. Capture mock supports agents using
-OpenAI-compatible `/chat/completions`; inherited variables named by repo manifest
-mappings are removed, then supported OpenAI/OpenRouter/BenchFlow aliases point to
-mock. `--rpc-timeout <milliseconds>` bounds each ACP request; failures clean
-up mock plus agent process group and exit nonzero. `--out` is truncated before
-launch; success requires at least one valid request written by newly started mock.
+OpenAI-compatible `/chat/completions`; the agent gets a disposable home directory,
+inherited provider routing/auth variables are removed, then supported
+OpenAI/OpenRouter/BenchFlow aliases point to mock. `--rpc-timeout <milliseconds>`
+bounds each ACP request; failures clean up the disposable home, mock, and agent
+process group and exit nonzero. `--out` is truncated before launch; success
+requires at least one valid request written by newly started mock.
 
 The model call is what matters for parity; `mock_upstream` removes model
 non-determinism so any post-normalization diff is a real, benchflow-introduced

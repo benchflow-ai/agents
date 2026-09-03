@@ -4,6 +4,11 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const mode = process.env.ACP_FIXTURE_MODE ?? "ok";
+if (process.env.ACP_FIXTURE_HOME_MARKER)
+  writeFileSync(
+    join(process.env.HOME, process.env.ACP_FIXTURE_HOME_MARKER),
+    "isolated",
+  );
 if (process.env.ACP_FIXTURE_CHILD_PID) {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
     stdio: "ignore",

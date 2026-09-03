@@ -1,6 +1,14 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import readline from "node:readline";
 
 const PROVIDER_ENV = new Set(
@@ -26,7 +34,7 @@ export function positiveNumber(value, name, { integer = false, max } = {}) {
   return number;
 }
 
-function agentEnv(baseUrl, model) {
+function agentEnv(baseUrl, model, home) {
   const clean = Object.fromEntries(
     Object.entries(process.env).filter(([name]) => !PROVIDER_ENV.has(name)),
   );
@@ -54,6 +62,10 @@ function agentEnv(baseUrl, model) {
   ])
     clean[name] = model;
   return Object.assign(clean, {
+    HOME: home,
+    XDG_CACHE_HOME: join(home, ".cache"),
+    XDG_CONFIG_HOME: join(home, ".config"),
+    XDG_DATA_HOME: join(home, ".local", "share"),
     OPENAI_BASE_PATH: "v1/chat/completions",
     GOOSE_PROVIDER: "openai",
     BENCHFLOW_PROVIDER_PROTOCOL: "openai-completions",
@@ -296,6 +308,7 @@ export async function runAcpProbe(config) {
   let agent;
   let mock;
   writeFileSync(config.out, "");
+  const home = mkdtempSync(join(tmpdir(), "agents-parity-home-"));
   try {
     mock = spawn(
       process.execPath,
@@ -319,7 +332,7 @@ export async function runAcpProbe(config) {
       config.launch ? ["-c", config.launch] : [config.server],
       {
         cwd: config.cwd,
-        env: agentEnv(baseUrl, config.model),
+        env: agentEnv(baseUrl, config.model, home),
         detached: process.platform !== "win32",
         stdio: ["pipe", "pipe", "inherit"],
       },
@@ -334,5 +347,6 @@ export async function runAcpProbe(config) {
   } finally {
     await stop(agent);
     await stop(mock);
+    rmSync(home, { recursive: true, force: true });
   }
 }
