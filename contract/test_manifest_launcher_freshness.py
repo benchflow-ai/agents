@@ -22,6 +22,11 @@ Two drift hazards, one per section below:
    sibling file is what humans review and edit. A byte-compare pins them
    together: editing one without regenerating the other fails here.
 
+3. OpenClaw — its Python shim is committed beside its manifest while the
+   manifest carries the deployed bytes inline. The explicit target mapping
+   below keeps those bytes equal without assuming every sibling Python file is
+   a launcher payload.
+
 Run: PYTHONPATH=. pytest test_manifest_launcher_freshness.py
 """
 
@@ -29,11 +34,11 @@ from __future__ import annotations
 
 import base64
 import re
+import tomllib
 import types
 from pathlib import Path
 
 import pytest
-import tomllib
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST = _REPO_ROOT / "acp" / "pi-acp" / "manifest.toml"
@@ -62,7 +67,7 @@ def _load_embedded_launcher() -> types.ModuleType:
     src = _embedded_launcher_source()
     mod = types.ModuleType("pi_acp_launcher_embedded")
     code = compile(src, f"{_MANIFEST}:pi-acp-launcher", "exec")
-    exec(code, mod.__dict__)  # noqa: S102 — trusted, repo-controlled source
+    exec(code, mod.__dict__)
     return mod
 
 
@@ -137,4 +142,35 @@ def test_embedded_blob_matches_sibling_launcher_source(launcher: Path) -> None:
         f"{manifest}: no base64 blob in install_cmd decodes to the committed "
         f"{launcher.name} — the embed and the source have drifted. Regenerate "
         "with: base64 < launcher.sh | tr -d '\\n' and replace the blob."
+    )
+
+
+_OPENCLAW_MANIFEST = _REPO_ROOT / "acp" / "openclaw" / "manifest.toml"
+_OPENCLAW_SOURCE = _OPENCLAW_MANIFEST.with_name("openclaw_acp_shim.py")
+_OPENCLAW_TARGET = "/opt/benchflow/bin/openclaw-acp-shim"
+_OPENCLAW_BLOB_RE = re.compile(
+    rf"\becho\s+([A-Za-z0-9+/=]+)\s*\|\s*base64\s+"
+    rf"(?:-d|--decode)\s*>\s*{re.escape(_OPENCLAW_TARGET)}\b"
+)
+
+
+def test_openclaw_manifest_identity_is_stable() -> None:
+    """Guards extraction issue #1090's external OpenClaw identity contract."""
+    manifest = tomllib.loads(_OPENCLAW_MANIFEST.read_text())
+    assert manifest["name"] == "openclaw"
+    assert manifest["aliases"] == ["openclaw"]
+    assert list(dict.fromkeys(manifest["aliases"])) == manifest["aliases"]
+
+
+def test_openclaw_embedded_blob_matches_canonical_source() -> None:
+    """Guards extraction issue #1090 against readable/deployed shim drift."""
+    install_cmd = tomllib.loads(_OPENCLAW_MANIFEST.read_text())["install_cmd"]
+    blobs = _OPENCLAW_BLOB_RE.findall(install_cmd)
+    assert len(blobs) == 1, (
+        f"{_OPENCLAW_MANIFEST}: expected exactly one base64 write to "
+        f"{_OPENCLAW_TARGET}, found {len(blobs)}"
+    )
+    assert base64.b64decode(blobs[0], validate=True) == _OPENCLAW_SOURCE.read_bytes(), (
+        f"{_OPENCLAW_MANIFEST}: {_OPENCLAW_TARGET} payload drifted from "
+        f"{_OPENCLAW_SOURCE.name}; regenerate the manifest blob"
     )
