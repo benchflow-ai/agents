@@ -61,14 +61,14 @@ def test_max_token_config_is_capped(
 
 
 def test_uncapped_model_preserves_configured_max_tokens(shim) -> None:
-    """Guards BenchFlow commit 264ba74 uncapped-model pass-through."""
+    """Guards BenchFlow PR #1075 uncapped-model pass-through."""
     assert shim._max_tokens_value("other-model", "invalid") == "invalid"
 
 
 def test_workspace_links_task_and_copies_first_skill_source(
     shim, tmp_path, monkeypatch
 ) -> None:
-    """Guards BenchFlow commit 264ba74 workspace/skill behavior."""
+    """Guards BenchFlow PR #1075 workspace/skill behavior."""
     home = tmp_path / "home"
     work = tmp_path / "task"
     skill = home / ".claude" / "skills" / "demo"
@@ -84,7 +84,7 @@ def test_workspace_links_task_and_copies_first_skill_source(
 
 
 def test_openai_auth_preserves_existing_profiles(shim, tmp_path, monkeypatch) -> None:
-    """Guards BenchFlow commit 264ba74 native OpenAI auth-store merge."""
+    """Guards BenchFlow PR #1075 native OpenAI auth-store merge."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     path = tmp_path / ".openclaw" / "agents" / "main" / "agent" / "auth-profiles.json"
@@ -100,7 +100,7 @@ def test_openai_auth_preserves_existing_profiles(shim, tmp_path, monkeypatch) ->
 
 
 def test_openai_auth_without_key_is_noop(shim, tmp_path, monkeypatch) -> None:
-    """Guards BenchFlow commit 264ba74 no-key auth behavior."""
+    """Guards BenchFlow PR #1075 no-key auth behavior."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     shim.setup_openai_auth()
@@ -111,7 +111,7 @@ def test_openai_auth_without_key_is_noop(shim, tmp_path, monkeypatch) -> None:
 def test_gcloud_adc_writes_credentials_and_enables_plugin(
     shim, tmp_path, monkeypatch
 ) -> None:
-    """Guards BenchFlow commit 264ba74 Vertex ADC/plugin setup seam."""
+    """Guards BenchFlow PR #1075 Vertex ADC/plugin setup seam."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv(
         "GOOGLE_APPLICATION_CREDENTIALS_JSON", '{"type":"authorized_user"}'
@@ -134,7 +134,7 @@ def test_gcloud_adc_writes_credentials_and_enables_plugin(
 def test_custom_provider_merges_config_and_model_metadata(
     shim, tmp_path, monkeypatch
 ) -> None:
-    """Guards BenchFlow commit 264ba74 custom-provider config format."""
+    """Guards BenchFlow PR #1075 custom-provider config format."""
     monkeypatch.setenv("HOME", str(tmp_path))
     path = tmp_path / ".openclaw" / "openclaw.json"
     path.parent.mkdir(parents=True)
@@ -468,7 +468,7 @@ def test_registry_provider_missing_api_key_does_not_register(
 def test_set_model_preserves_provider_model_formats(
     shim, monkeypatch, provider: str, requested: str, configured: str
 ) -> None:
-    """Guards BenchFlow commit 264ba74 model-prefix reconstruction behavior."""
+    """Guards BenchFlow PR #1075 model-prefix reconstruction behavior."""
     monkeypatch.setattr(shim, "setup_openai_auth", lambda: None)
     monkeypatch.setattr(shim, "setup_gcloud_adc", lambda: None)
     if provider:
@@ -545,7 +545,7 @@ def test_set_model_writes_generation_params_and_surfaces_failure(
 
 
 def test_parse_session_jsonl_emits_text_thought_tool_and_result(shim, tmp_path) -> None:
-    """Guards BenchFlow commit 264ba74 JSONL-to-ACP trajectory mapping."""
+    """Guards BenchFlow PR #1075 JSONL-to-ACP trajectory mapping."""
     path = tmp_path / "session.jsonl"
     rows = [
         {
@@ -587,7 +587,7 @@ def test_parse_session_jsonl_emits_text_thought_tool_and_result(shim, tmp_path) 
 
 
 def test_parse_missing_session_is_safe_fallback(shim, tmp_path) -> None:
-    """Guards BenchFlow commit 264ba74 missing-trajectory fallback."""
+    """Guards BenchFlow PR #1075 missing-trajectory fallback."""
     assert shim.parse_session_jsonl(tmp_path / "missing.jsonl", "s") == []
 
 
@@ -620,7 +620,7 @@ def _run_one_prompt(shim, monkeypatch, outcome) -> list[dict]:
 
 
 def test_prompt_subprocess_error_is_protocol_error(shim, monkeypatch) -> None:
-    """Guards BenchFlow commit 264ba74 subprocess error response."""
+    """Guards BenchFlow PR #1075 subprocess error response."""
 
     def fail(*args, **kwargs):
         raise OSError("spawn failed")
@@ -632,7 +632,7 @@ def test_prompt_subprocess_error_is_protocol_error(shim, monkeypatch) -> None:
 
 
 def test_prompt_timeout_returns_end_turn_then_cancel_ack(shim, monkeypatch) -> None:
-    """Guards BenchFlow commit 264ba74 blocking timeout/cancel semantics."""
+    """Guards BenchFlow PR #1075 blocking timeout/cancel semantics."""
 
     def timeout(*args, **kwargs):
         raise subprocess.TimeoutExpired(args[0], 920)
