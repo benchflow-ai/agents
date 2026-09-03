@@ -52,6 +52,9 @@ async function postMock() {
 const earlyPrompt = {
   exit: () => process.exit(7),
   malformed: () => process.stdout.write("not-json\n"),
+  null: () => process.stdout.write("null\n"),
+  primitive: () => process.stdout.write("42\n"),
+  array: () => process.stdout.write("[]\n"),
   hang: () => undefined,
   "rpc-error": (message) =>
     send({
@@ -114,6 +117,12 @@ const handlers = {
     return response(message.id, { sessionId });
   },
   "session/set_model"(message) {
+    if (mode === "reject-set-model")
+      return send({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32601, message: "set_model unsupported" },
+      });
     if (message.params?.sessionId !== sessionId)
       throw new Error("missing sessionId on set_model");
     return response(message.id, {});

@@ -11,7 +11,7 @@ try {
   const launch = option(argv, "launch");
   if (Boolean(server) === Boolean(launch))
     throw new Error(
-      "usage: (--server <server.mjs> | --launch <trusted POSIX shell command>) --out <log> [--port --model --cwd --prompt --rpc-timeout --ready-timeout]",
+      "usage: (--server <server.mjs> | --launch <trusted POSIX shell command>) --out <log> [--port --model --cwd --prompt --rpc-timeout --ready-timeout --set-model]",
     );
   const cwd = option(argv, "cwd", mkdtempSync(join(tmpdir(), "parity-")));
   const out = option(argv, "out", "/tmp/parity-outside.jsonl");
@@ -39,7 +39,7 @@ try {
       option(argv, "ready-timeout", "5000"),
       "ready-timeout",
     ),
-    setModel: true,
+    setModel: argv.includes("--set-model"),
     tag: "capture",
   });
   const hello = join(cwd, "hello.txt");

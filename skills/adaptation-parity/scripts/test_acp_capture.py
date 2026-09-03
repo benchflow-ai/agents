@@ -109,6 +109,9 @@ def test_capture_modes_drive_strict_acp_and_mock(mode: str, tmp_path: Path) -> N
     [
         ("exit", "agent exited"),
         ("malformed", "malformed ACP JSON"),
+        ("null", "malformed ACP message"),
+        ("primitive", "malformed ACP message"),
+        ("array", "malformed ACP message"),
         ("hang", "timed out"),
         ("rpc-error", "ACP session/prompt failed: fixture RPC rejection"),
     ],
@@ -156,6 +159,21 @@ def test_fs_callbacks_reject_symlink_escape(tmp_path: Path) -> None:
     proc = run(probe_args(tmp_path), ACP_FIXTURE_PATH=str(link))
     assert proc.returncode == 1
     assert target.read_text() == "outside"
+
+
+def test_fs_callbacks_reject_dangling_symlink_escape(tmp_path: Path) -> None:
+    target = tmp_path.parent / "missing-outside.txt"
+    link = tmp_path / "link.txt"
+    link.symlink_to(target)
+    proc = run(probe_args(tmp_path), ACP_FIXTURE_PATH=str(link))
+    assert proc.returncode == 1
+    assert "dangling symlink" in proc.stderr
+    assert not target.exists()
+
+
+def test_capture_does_not_set_model_by_default(tmp_path: Path) -> None:
+    proc = run(probe_args(tmp_path), ACP_FIXTURE_MODE="reject-set-model")
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_smoke_uses_shared_driver(tmp_path: Path) -> None:

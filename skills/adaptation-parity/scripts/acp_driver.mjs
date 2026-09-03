@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -127,6 +128,12 @@ function waitForMock(mock, port, timeoutMs) {
 function confinedPath(cwd, path, writing = false) {
   const root = realpathSync(cwd);
   const lexical = resolve(root, path);
+  if (
+    writing &&
+    lstatSync(lexical, { throwIfNoEntry: false })?.isSymbolicLink() &&
+    !existsSync(lexical)
+  )
+    throw new Error(`ACP filesystem path is a dangling symlink: ${path}`);
   const target = existsSync(lexical)
     ? realpathSync(lexical)
     : writing
@@ -230,6 +237,8 @@ class AcpClient {
     } catch {
       return this.fail(`malformed ACP JSON: ${line.slice(0, 120)}`);
     }
+    if (!message || typeof message !== "object" || Array.isArray(message))
+      return this.fail(`malformed ACP message: ${line.slice(0, 120)}`);
     if (message.method && message.id != null) this.reply(message);
     else if (message.method === "session/update")
       this.updates.push(message.params?.update);
