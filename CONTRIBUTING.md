@@ -134,9 +134,9 @@ Root `.github/workflows/` runs per-package tests (path-filtered) — including t
 (pinned to the `.pre-commit-config.yaml` version) and a markdown
 link check on PRs. The `acp-registry` job also fails the build when `AGENTS.md` is
 stale, so regenerate it after any `catalog.py` (or snapshot) edit (see the
-acp-registry dev-setup above). The `contract/` tests are not yet a CI job — run
-them locally. Please make sure the relevant package's tests and lint pass locally
-before opening a PR.
+acp-registry dev-setup above). The `contract/` and OpenClaw shim tests run in
+the `contract-openclaw` workflow. Please make sure the relevant package's tests
+and lint pass locally before opening a PR.
 
 `pre-commit install` at the repo root enables the same hooks (ruff,
 ruff-format, typos) locally.
