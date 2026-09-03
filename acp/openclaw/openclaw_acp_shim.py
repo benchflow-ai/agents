@@ -22,10 +22,12 @@ import json
 import logging
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -42,6 +44,10 @@ _DIAG_TRUNCATE = 2000  # max chars for diagnostic output in ACP updates
 _TOOL_RESULT_TRUNCATE = 1000  # max chars for tool result text
 _TOOL_INPUT_TRUNCATE = 500  # max chars for tool input echoed in ACP updates
 _OPENCLAW_BIN = "/opt/benchflow/bin/openclaw"
+_PROMPT_TIMEOUT = 920.0
+_POLL_INTERVAL = 0.1
+_TERMINATE_GRACE = 2.0
+_CAPTURE_LIMIT = 1024 * 1024
 
 _PARAM_MAP = {
     "BENCHFLOW_MODEL_TEMPERATURE": "agents.defaults.params.temperature",
@@ -79,9 +85,14 @@ def _max_tokens_value(model: str, configured: str | None) -> str | None:
 # ── ACP stdio I/O ─────────────────────────────────────────────────────────────
 
 
+_SEND_LOCK = threading.Lock()
+
+
 def send(msg):
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
+    line = json.dumps(msg) + "\n"
+    with _SEND_LOCK:
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
 
 def recv():
@@ -489,25 +500,6 @@ def _resolve_bare_model_prefix(model: str) -> str:
 # ── Session parsing ───────────────────────────────────────────────────────────
 
 
-def find_session_jsonl() -> Path | None:
-    """Find the most recent openclaw session JSONL file."""
-    home = os.environ.get("HOME", os.path.expanduser("~"))
-    sessions_dir = Path(home) / ".openclaw" / "agents" / "main" / "sessions"
-    if not sessions_dir.exists():
-        return None
-
-    jsonl_files = sorted(
-        sessions_dir.glob("*.jsonl"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
-    )
-    # Skip .lock files
-    for f in jsonl_files:
-        if not f.name.endswith(".lock"):
-            return f
-    return None
-
-
 def parse_session_jsonl(path: Path, session_id: str) -> list[dict]:
     """Parse openclaw session JSONL and convert to ACP session/update events.
 
@@ -649,6 +641,325 @@ def parse_session_jsonl(path: Path, session_id: str) -> list[dict]:
     return updates
 
 
+def _file_state(path: Path) -> tuple[int, int, int, int] | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
+
+class _SessionTailer:
+    """Emit only updates appended during one OpenClaw prompt."""
+
+    def __init__(self, sessions_dir: Path):
+        self.sessions_dir = sessions_dir
+        self.baseline = {}
+        for path in self._paths():
+            state = _file_state(path)
+            if state:
+                self.baseline[path] = (*state, len(parse_session_jsonl(path, "")))
+        self.path = None
+        self.state = None
+        self.count = 0
+
+    def _paths(self) -> list[Path]:
+        if not self.sessions_dir.exists():
+            return []
+        return [
+            path
+            for path in self.sessions_dir.glob("*.jsonl")
+            if not path.name.endswith(".lock")
+        ]
+
+    def _changed(self, path: Path, state: tuple[int, int, int, int]) -> bool:
+        old = self.baseline.get(path)
+        return old is None or state != old[:4]
+
+    def _start_count(self, path: Path, state: tuple[int, int, int, int]) -> int:
+        old = self.baseline.get(path)
+        return (
+            old[4]
+            if old
+            and old[:2] == state[:2]
+            and (state[2] > old[2] or state[3] == old[3])
+            else 0
+        )
+
+    def _select(self, path: Path, state: tuple[int, int, int, int]) -> None:
+        self.path = path
+        self.state = state
+        self.count = self._start_count(path, state)
+
+    def poll(self, session_id: str) -> list[dict]:
+        selected = False
+        if self.path is None:
+            candidates = []
+            for path in self._paths():
+                state = _file_state(path)
+                if state and self._changed(path, state):
+                    candidates.append((path, state))
+            if len(candidates) != 1:
+                return []
+            self._select(*candidates[0])
+            selected = True
+
+        state = _file_state(self.path)
+        if state is None:
+            return []
+        if not selected and state == self.state:
+            return []
+        if (
+            state[:2] != self.state[:2]
+            or state[2] < self.state[2]
+            or (state[2] == self.state[2] and state[3] != self.state[3])
+        ):
+            self.count = 0
+        self.state = state
+        updates = parse_session_jsonl(self.path, session_id)
+        if len(updates) < self.count:
+            self.count = 0
+        new = updates[self.count :]
+        self.count = len(updates)
+        return new
+
+    def drain(
+        self, session_id: str, openclaw_session_id: str | None
+    ) -> tuple[list[dict], str | None]:
+        if (
+            openclaw_session_id
+            and Path(openclaw_session_id).name != openclaw_session_id
+        ):
+            return self.poll(session_id), (
+                "[openclaw-acp-shim] invalid session ID in OpenClaw stdout"
+            )
+        expected = (
+            self.sessions_dir / f"{openclaw_session_id}.jsonl"
+            if openclaw_session_id
+            else None
+        )
+        if expected and self.path and self.path != expected:
+            state = _file_state(expected)
+            count = self._start_count(expected, state) if state else 0
+            updates = parse_session_jsonl(expected, session_id)[count:]
+            return updates, (
+                f"[openclaw-acp-shim] session JSONL mismatch: streamed "
+                f"{self.path.name}, stdout identified {expected.name}"
+            )
+        state = _file_state(expected) if expected else None
+        if expected and self.path is None and state:
+            self._select(expected, state)
+            updates = parse_session_jsonl(expected, session_id)
+            new = updates[self.count :]
+            self.count = len(updates)
+            return new, None
+        return self.poll(session_id), None
+
+
+class _PromptState:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.token = None
+        self.worker = None
+        self.process = None
+        self.cancelled = False
+
+    def reserve(self, token) -> bool:
+        with self.lock:
+            if self.token is not None:
+                return False
+            self.token = token
+            self.cancelled = False
+            return True
+
+    def set_worker(self, token, worker) -> None:
+        with self.lock:
+            if self.token == token:
+                self.worker = worker
+
+    def publish(self, token, process) -> bool:
+        with self.lock:
+            if self.token == token:
+                self.process = process
+            return self.token != token or self.cancelled
+
+    def cancel(self) -> None:
+        with self.lock:
+            if self.token is not None:
+                self.cancelled = True
+
+    def is_cancelled(self, token) -> bool:
+        with self.lock:
+            return self.token == token and self.cancelled
+
+    def active(self) -> bool:
+        with self.lock:
+            return self.token is not None
+
+    def finish(self, token) -> None:
+        with self.lock:
+            if self.token == token:
+                self.token = self.worker = self.process = None
+                self.cancelled = False
+
+    def worker_snapshot(self):
+        with self.lock:
+            return self.worker
+
+
+def _terminate_process_group(proc, grace: float = _TERMINATE_GRACE) -> None:
+    deadline = time.monotonic() + grace
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        group_alive = False
+    else:
+        group_alive = True
+    while group_alive and time.monotonic() < deadline:
+        time.sleep(max(0, min(0.05, deadline - time.monotonic())))
+        try:
+            os.killpg(proc.pid, 0)
+        except ProcessLookupError:
+            group_alive = False
+    if group_alive:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
+def _openclaw_session_id(stdout: str) -> str | None:
+    try:
+        data = json.loads(stdout.strip())
+        return data.get("meta", {}).get("agentMeta", {}).get("sessionId")
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        match = re.search(r'"sessionId"\s*:\s*"([^"]+)"', stdout)
+        return match.group(1) if match else None
+
+
+def _thought(session_id: str, text: str) -> None:
+    send(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "agent_thought",
+                    "text": text[:_DIAG_TRUNCATE],
+                },
+            },
+        }
+    )
+
+
+def _run_prompt(
+    state: _PromptState,
+    token,
+    request_id,
+    session_id: str,
+    command: tuple[str, ...],
+    env: dict[str, str],
+    sessions_dir: Path,
+    *,
+    timeout: float = _PROMPT_TIMEOUT,
+    poll_interval: float = _POLL_INTERVAL,
+) -> None:
+    proc = None
+    cancelled = False
+    tailer = _SessionTailer(sessions_dir)
+    try:
+        with (
+            tempfile.TemporaryFile() as stdout_file,
+            tempfile.TemporaryFile() as stderr_file,
+        ):
+            proc = subprocess.Popen(
+                command,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                env=env,
+                start_new_session=True,
+            )
+            cancelled = state.publish(token, proc)
+            deadline = time.monotonic() + timeout
+            while proc.poll() is None:
+                for update in tailer.poll(session_id):
+                    send(update)
+                cancelled = cancelled or state.is_cancelled(token)
+                timed_out = time.monotonic() >= deadline
+                if cancelled or timed_out:
+                    _terminate_process_group(proc)
+                    break
+                time.sleep(poll_interval)
+            else:
+                proc.wait()
+
+            stdout_file.flush()
+            stderr_file.flush()
+            stdout_file.seek(0)
+            stderr_file.seek(0)
+            stdout = stdout_file.read(_CAPTURE_LIMIT).decode(errors="replace")
+            stderr = stderr_file.read(_DIAG_TRUNCATE + 1).decode(errors="replace")
+
+            if stderr.strip():
+                _thought(session_id, f"[openclaw stderr]\n{stderr}")
+
+            oc_session_id = _openclaw_session_id(stdout)
+            updates, diagnostic = tailer.drain(session_id, oc_session_id)
+            for update in updates:
+                send(update)
+            if diagnostic:
+                _thought(session_id, diagnostic)
+
+            if tailer.path is None:
+                try:
+                    agent_text = (
+                        json.loads(stdout).get("payloads", [{}])[0].get("text", "")
+                    )
+                except (json.JSONDecodeError, AttributeError, IndexError, KeyError):
+                    agent_text = stdout[:_DIAG_TRUNCATE]
+                if agent_text:
+                    send(
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "session/update",
+                            "params": {
+                                "sessionId": session_id,
+                                "update": {
+                                    "sessionUpdate": "text_update",
+                                    "text": agent_text,
+                                },
+                            },
+                        }
+                    )
+
+            cancelled = cancelled or state.is_cancelled(token)
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"stopReason": "cancelled" if cancelled else "end_turn"},
+                }
+            )
+    except Exception as exc:
+        if proc is not None and proc.poll() is None:
+            _terminate_process_group(proc)
+        send(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32603, "message": str(exc)},
+            }
+        )
+    finally:
+        state.finish(token)
+
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 
@@ -657,11 +968,22 @@ def main():
     setup_gcloud_adc()
     session_id = "openclaw-shim"
     cwd = "/app"
+    prompt_state = _PromptState()
 
     while True:
         try:
             msg = recv()
         except EOFError:
+            prompt_state.cancel()
+            worker = prompt_state.worker_snapshot()
+            if worker:
+                worker.join(2 * _TERMINATE_GRACE + 1)
+                if worker.is_alive():
+                    print(
+                        "[openclaw-acp-shim] prompt worker still stopping after stdin EOF",
+                        file=sys.stderr,
+                        flush=True,
+                    )
             break
 
         method = msg.get("method", "")
@@ -685,6 +1007,15 @@ def main():
             )
 
         elif method == "session/new":
+            if prompt_state.active():
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32600, "message": "prompt already active"},
+                    }
+                )
+                continue
             cwd = params.get("cwd", "/app")
             setup_workspace(cwd)
             session_id = "openclaw-shim"
@@ -697,6 +1028,15 @@ def main():
             )
 
         elif method == "session/set_model":
+            if prompt_state.active():
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32600, "message": "prompt already active"},
+                    }
+                )
+                continue
             model = params.get("modelId", "")
             requested_model = model
             # A provider-resolution / config-write failure here must NOT crash the
@@ -810,146 +1150,60 @@ def main():
                 if isinstance(part, dict) and part.get("type") == "text":
                     text += part.get("text", "")
 
+            token = object()
+            if not prompt_state.reserve(token):
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32600, "message": "prompt already active"},
+                    }
+                )
+                continue
+            command = (
+                _OPENCLAW_BIN,
+                "agent",
+                "--local",
+                "--agent",
+                "main",
+                "--json",
+                "-m",
+                text,
+                "--timeout",
+                "900",
+            )
+            home = os.environ.get("HOME", os.path.expanduser("~"))
+            sessions_dir = Path(home) / ".openclaw" / "agents" / "main" / "sessions"
+            worker = threading.Thread(
+                target=_run_prompt,
+                args=(
+                    prompt_state,
+                    token,
+                    req_id,
+                    session_id,
+                    command,
+                    dict(os.environ),
+                    sessions_dir,
+                ),
+                name="openclaw-prompt",
+            )
+            prompt_state.set_worker(token, worker)
             try:
-                result = subprocess.run(
-                    [
-                        _OPENCLAW_BIN,
-                        "agent",
-                        "--local",
-                        "--agent",
-                        "main",
-                        "--json",
-                        "-m",
-                        text,
-                        "--timeout",
-                        "900",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=920,
-                    env={**os.environ},
-                )
-
-                # Surface stderr as agent thought (for debugging)
-                if result.stderr and result.stderr.strip():
-                    send(
-                        {
-                            "jsonrpc": "2.0",
-                            "method": "session/update",
-                            "params": {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "agent_thought",
-                                    "text": f"[openclaw stderr]\n{result.stderr[:_DIAG_TRUNCATE]}",
-                                },
-                            },
-                        }
-                    )
-
-                # Parse openclaw's session JSONL for full trajectory
-                # Extract session ID from JSON output (may be multi-line)
-                oc_session_id = None
-                try:
-                    # openclaw --json output can be multi-line pretty-printed
-                    stdout = result.stdout.strip()
-                    if stdout:
-                        response_data = json.loads(stdout)
-                        oc_session_id = (
-                            response_data.get("meta", {})
-                            .get("agentMeta", {})
-                            .get("sessionId")
-                        )
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    # Try finding sessionId in raw output
-                    import re
-
-                    m = re.search(r'"sessionId"\s*:\s*"([^"]+)"', result.stdout or "")
-                    if m:
-                        oc_session_id = m.group(1)
-
-                # Find session JSONL: try specific ID first, then most recent
-                session_jsonl = None
-                home = os.environ.get("HOME", os.path.expanduser("~"))
-                sessions_dir = Path(home) / ".openclaw" / "agents" / "main" / "sessions"
-
-                if oc_session_id:
-                    specific = sessions_dir / f"{oc_session_id}.jsonl"
-                    if specific.exists():
-                        session_jsonl = specific
-
-                if not session_jsonl:
-                    session_jsonl = find_session_jsonl()
-
-                # Fallback: scan directory for most recent JSONL
-                if not session_jsonl and sessions_dir.exists():
-                    for jf in sorted(
-                        sessions_dir.glob("*.jsonl"),
-                        key=lambda f: f.stat().st_mtime,
-                        reverse=True,
-                    ):
-                        if jf.name not in ("sessions.json",) and not jf.name.endswith(
-                            ".lock"
-                        ):
-                            session_jsonl = jf
-                            break
-
-                if session_jsonl:
-                    updates = parse_session_jsonl(session_jsonl, session_id)
-                    for update in updates:
-                        send(update)
-
-                # If no JSONL trajectory, fall back to text response
-                if not session_jsonl:
-                    try:
-                        response = json.loads(result.stdout)
-                        agent_text = response.get("payloads", [{}])[0].get("text", "")
-                    except (json.JSONDecodeError, IndexError, KeyError):
-                        agent_text = (
-                            result.stdout[:_DIAG_TRUNCATE] if result.stdout else ""
-                        )
-
-                    if agent_text:
-                        send(
-                            {
-                                "jsonrpc": "2.0",
-                                "method": "session/update",
-                                "params": {
-                                    "sessionId": session_id,
-                                    "update": {
-                                        "sessionUpdate": "text_update",
-                                        "text": agent_text,
-                                    },
-                                },
-                            }
-                        )
-
+                worker.start()
+            except Exception as exc:
+                prompt_state.finish(token)
                 send(
                     {
                         "jsonrpc": "2.0",
                         "id": req_id,
-                        "result": {"stopReason": "end_turn"},
-                    }
-                )
-
-            except subprocess.TimeoutExpired:
-                send(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "result": {"stopReason": "end_turn"},
-                    }
-                )
-            except Exception as e:
-                send(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "error": {"code": -32603, "message": str(e)},
+                        "error": {"code": -32603, "message": str(exc)},
                     }
                 )
 
         elif method == "session/cancel":
-            send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+            prompt_state.cancel()
+            if req_id is not None:
+                send({"jsonrpc": "2.0", "id": req_id, "result": {}})
 
         elif method == "session/request_permission":
             options = params.get("options", [])
