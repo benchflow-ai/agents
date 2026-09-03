@@ -39,9 +39,9 @@ python parity_diff.py /tmp/outside.jsonl /tmp/inside.jsonl
 
 `--launch` runs a trusted local command with POSIX `/bin/sh -c`; `--server`
 executes a Node script directly. Mock capture supports OpenAI-compatible
-`/chat/completions` agents. It clears ambient provider variables named by this
-repo's manifest mappings before injecting mock routing. Output file is replaced
-per run; zero fresh requests is failure.
+`/chat/completions` agents. It gives the agent a disposable home directory and
+clears ambient provider routing/auth variables before injecting mock routing.
+Output file is replaced per run; zero fresh requests is failure.
 
 `parity_diff.py` — a thin CLI over the importable
 [`parity`](../skills/adaptation-parity/scripts/parity.py) module (`assert_wire_parity` /

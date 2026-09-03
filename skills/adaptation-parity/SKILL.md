@@ -54,8 +54,8 @@ python scripts/parity_diff.py /tmp/outside.jsonl /tmp/inside.jsonl
 
 `--launch` executes a trusted local command through POSIX `/bin/sh -c`.
 Standalone capture supports OpenAI-compatible `/chat/completions` agents. It
-removes inherited provider variables named by this repo's manifest mappings,
-then injects mock routing variables before launch.
+launches the agent with a disposable home directory, removes inherited provider
+routing/auth variables, then injects mock routing variables before launch.
 
 `parity_diff.py` normalizes the **expected-neutral** differences (gateway
 model-alias rename; sandbox cwd vs local; `content:null` vs omitted from proxy
