@@ -146,11 +146,15 @@ def test_embedded_blob_matches_sibling_launcher_source(launcher: Path) -> None:
 
 
 _OPENCLAW_MANIFEST = _REPO_ROOT / "acp" / "openclaw" / "manifest.toml"
-_OPENCLAW_SOURCE = _OPENCLAW_MANIFEST.with_name("openclaw_acp_shim.py")
-_OPENCLAW_TARGET = "/opt/benchflow/bin/openclaw-acp-shim"
-_OPENCLAW_BLOB_RE = re.compile(
-    rf"\becho\s+([A-Za-z0-9+/=]+)\s*\|\s*base64\s+"
-    rf"(?:-d|--decode)\s*>\s*{re.escape(_OPENCLAW_TARGET)}\b"
+_OPENCLAW_EMBEDS = (
+    (
+        _OPENCLAW_MANIFEST.with_name("openclaw_acp_shim.py"),
+        "/opt/benchflow/bin/openclaw-acp-shim",
+    ),
+    (
+        _OPENCLAW_MANIFEST.with_name("openclaw_prompt.py"),
+        "/opt/benchflow/bin/openclaw_prompt.py",
+    ),
 )
 
 
@@ -162,15 +166,26 @@ def test_openclaw_manifest_identity_is_stable() -> None:
     assert list(dict.fromkeys(manifest["aliases"])) == manifest["aliases"]
 
 
-def test_openclaw_embedded_blob_matches_canonical_source() -> None:
-    """Guards extraction issue #1090 against readable/deployed shim drift."""
+@pytest.mark.parametrize(
+    "source,target",
+    _OPENCLAW_EMBEDS,
+    ids=[source.name for source, _ in _OPENCLAW_EMBEDS],
+)
+def test_openclaw_embedded_blob_matches_canonical_source(
+    source: Path, target: str
+) -> None:
+    """Guards agents PR #73 against readable/deployed module drift."""
     install_cmd = tomllib.loads(_OPENCLAW_MANIFEST.read_text())["install_cmd"]
-    blobs = _OPENCLAW_BLOB_RE.findall(install_cmd)
+    pattern = re.compile(
+        rf"\becho\s+([A-Za-z0-9+/=]+)\s*\|\s*base64\s+"
+        rf"(?:-d|--decode)\s*>\s*{re.escape(target)}\b"
+    )
+    blobs = pattern.findall(install_cmd)
     assert len(blobs) == 1, (
         f"{_OPENCLAW_MANIFEST}: expected exactly one base64 write to "
-        f"{_OPENCLAW_TARGET}, found {len(blobs)}"
+        f"{target}, found {len(blobs)}"
     )
-    assert base64.b64decode(blobs[0], validate=True) == _OPENCLAW_SOURCE.read_bytes(), (
-        f"{_OPENCLAW_MANIFEST}: {_OPENCLAW_TARGET} payload drifted from "
-        f"{_OPENCLAW_SOURCE.name}; regenerate the manifest blob"
+    assert base64.b64decode(blobs[0], validate=True) == source.read_bytes(), (
+        f"{_OPENCLAW_MANIFEST}: {target} payload drifted from "
+        f"{source.name}; regenerate the manifest blob"
     )

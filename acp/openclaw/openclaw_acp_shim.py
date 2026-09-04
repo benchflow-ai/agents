@@ -22,7 +22,6 @@ import json
 import logging
 import os
 import re
-import signal
 import shutil
 import subprocess
 import sys
@@ -34,20 +33,26 @@ import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import openclaw_prompt as _prompt
+
+_CAPTURE_LIMIT = _prompt.CAPTURE_LIMIT
+_DIAG_TRUNCATE = _prompt.DIAG_TRUNCATE
+_POLL_INTERVAL = _prompt.POLL_INTERVAL
+_PROMPT_TIMEOUT = _prompt.PROMPT_TIMEOUT
+_TERMINATE_GRACE = _prompt.TERMINATE_GRACE
+_PromptState = _prompt.PromptState
+_SessionTailer = _prompt.SessionTailer
+parse_session_jsonl = _prompt.parse_session_jsonl
+run_prompt = _prompt.run_prompt
+_terminate_process_group = _prompt.terminate_process_group
+
 if TYPE_CHECKING:
     # Type-only; the shim must stay runnable without benchflow installed.
     from benchflow.agents.providers import ProviderConfig
 
 logger = logging.getLogger(__name__)
 
-_DIAG_TRUNCATE = 2000  # max chars for diagnostic output in ACP updates
-_TOOL_RESULT_TRUNCATE = 1000  # max chars for tool result text
-_TOOL_INPUT_TRUNCATE = 500  # max chars for tool input echoed in ACP updates
 _OPENCLAW_BIN = "/opt/benchflow/bin/openclaw"
-_PROMPT_TIMEOUT = 920.0
-_POLL_INTERVAL = 0.1
-_TERMINATE_GRACE = 2.0
-_CAPTURE_LIMIT = 1024 * 1024
 
 _PARAM_MAP = {
     "BENCHFLOW_MODEL_TEMPERATURE": "agents.defaults.params.temperature",
@@ -497,367 +502,6 @@ def _resolve_bare_model_prefix(model: str) -> str:
     )
 
 
-# ── Session parsing ───────────────────────────────────────────────────────────
-
-
-def parse_session_jsonl(path: Path, session_id: str) -> list[dict]:
-    """Parse openclaw session JSONL and convert to ACP session/update events.
-
-    openclaw JSONL format uses {type: "message", message: {role, content}} entries.
-    Roles: "user", "assistant", "toolResult"
-    Content blocks: text, tool_use, thinking (in assistant messages)
-    """
-    updates = []
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                # openclaw format: {type: "message", message: {role, content}}
-                if entry.get("type") != "message":
-                    continue
-
-                msg = entry.get("message", {})
-                role = msg.get("role", "")
-                content = msg.get("content", [])
-
-                if role == "assistant" and isinstance(content, list):
-                    for block in content:
-                        block_type = block.get("type", "")
-
-                        if block_type in ("text",):
-                            updates.append(
-                                {
-                                    "jsonrpc": "2.0",
-                                    "method": "session/update",
-                                    "params": {
-                                        "sessionId": session_id,
-                                        "update": {
-                                            "sessionUpdate": "text_update",
-                                            "text": block.get("text", ""),
-                                        },
-                                    },
-                                }
-                            )
-
-                        elif block_type in ("tool_use", "toolCall"):
-                            _input = block.get("input", block.get("arguments", {}))
-                            _title = _input.get(
-                                "command",
-                                _input.get("description", block.get("name", "tool")),
-                            )
-                            updates.append(
-                                {
-                                    "jsonrpc": "2.0",
-                                    "method": "session/update",
-                                    "params": {
-                                        "sessionId": session_id,
-                                        "update": {
-                                            "sessionUpdate": "tool_call",
-                                            "toolCallId": block.get("id", ""),
-                                            "kind": block.get("name", "tool"),
-                                            "title": _title,
-                                            "status": "completed",
-                                            "content": [
-                                                {
-                                                    "type": "content",
-                                                    "content": {
-                                                        "type": "text",
-                                                        "text": json.dumps(_input)[
-                                                            :_TOOL_INPUT_TRUNCATE
-                                                        ],
-                                                    },
-                                                }
-                                            ],
-                                        },
-                                    },
-                                }
-                            )
-
-                        elif block_type == "thinking":
-                            updates.append(
-                                {
-                                    "jsonrpc": "2.0",
-                                    "method": "session/update",
-                                    "params": {
-                                        "sessionId": session_id,
-                                        "update": {
-                                            "sessionUpdate": "agent_thought",
-                                            "text": block.get("thinking", ""),
-                                        },
-                                    },
-                                }
-                            )
-
-                elif role == "toolResult":
-                    # Emit as tool_call_update (status=completed) to update
-                    # the tool_call record created by the tool_use block
-                    tool_id = msg.get("toolCallId", "")
-                    result_text = ""
-                    if isinstance(content, list):
-                        result_text = " ".join(
-                            b.get("text", "")
-                            for b in content
-                            if isinstance(b, dict) and b.get("type") == "text"
-                        )
-                    elif isinstance(content, str):
-                        result_text = content
-
-                    updates.append(
-                        {
-                            "jsonrpc": "2.0",
-                            "method": "session/update",
-                            "params": {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "tool_call_update",
-                                    "toolCallId": tool_id,
-                                    "status": "completed",
-                                    "content": [
-                                        {
-                                            "type": "content",
-                                            "content": {
-                                                "type": "text",
-                                                "text": result_text[
-                                                    :_TOOL_RESULT_TRUNCATE
-                                                ],
-                                            },
-                                        }
-                                    ],
-                                },
-                            },
-                        }
-                    )
-
-    except Exception:
-        logger.debug("Failed to parse session JSONL for trajectory", exc_info=True)
-
-    return updates
-
-
-def _file_state(path: Path) -> tuple[int, int, int, int] | None:
-    try:
-        stat = path.stat()
-    except OSError:
-        return None
-    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
-
-
-class _SessionTailer:
-    """Emit only updates appended during one OpenClaw prompt."""
-
-    def __init__(self, sessions_dir: Path):
-        self.sessions_dir = sessions_dir
-        self.baseline = {}
-        for path in self._paths():
-            state = _file_state(path)
-            if state:
-                self.baseline[path] = (*state, len(parse_session_jsonl(path, "")))
-        self.path = None
-        self.state = None
-        self.count = 0
-
-    def _paths(self) -> list[Path]:
-        if not self.sessions_dir.exists():
-            return []
-        return [
-            path
-            for path in self.sessions_dir.glob("*.jsonl")
-            if not path.name.endswith(".lock")
-        ]
-
-    def _changed(self, path: Path, state: tuple[int, int, int, int]) -> bool:
-        old = self.baseline.get(path)
-        return old is None or state != old[:4]
-
-    def _start_count(self, path: Path, state: tuple[int, int, int, int]) -> int:
-        old = self.baseline.get(path)
-        return (
-            old[4]
-            if old
-            and old[:2] == state[:2]
-            and (state[2] > old[2] or state[3] == old[3])
-            else 0
-        )
-
-    def _select(self, path: Path, state: tuple[int, int, int, int]) -> None:
-        self.path = path
-        self.state = state
-        self.count = self._start_count(path, state)
-
-    def poll(self, session_id: str) -> list[dict]:
-        selected = False
-        if self.path is None:
-            candidates = []
-            for path in self._paths():
-                state = _file_state(path)
-                if state and self._changed(path, state):
-                    candidates.append((path, state))
-            if len(candidates) != 1:
-                return []
-            self._select(*candidates[0])
-            selected = True
-
-        state = _file_state(self.path)
-        if state is None:
-            return []
-        if not selected and state == self.state:
-            return []
-        if (
-            state[:2] != self.state[:2]
-            or state[2] < self.state[2]
-            or (state[2] == self.state[2] and state[3] != self.state[3])
-        ):
-            self.count = 0
-        self.state = state
-        updates = parse_session_jsonl(self.path, session_id)
-        if len(updates) < self.count:
-            self.count = 0
-        new = updates[self.count :]
-        self.count = len(updates)
-        return new
-
-    def drain(
-        self, session_id: str, openclaw_session_id: str | None
-    ) -> tuple[list[dict], str | None]:
-        if (
-            openclaw_session_id
-            and Path(openclaw_session_id).name != openclaw_session_id
-        ):
-            return self.poll(session_id), (
-                "[openclaw-acp-shim] invalid session ID in OpenClaw stdout"
-            )
-        expected = (
-            self.sessions_dir / f"{openclaw_session_id}.jsonl"
-            if openclaw_session_id
-            else None
-        )
-        if expected and self.path and self.path != expected:
-            state = _file_state(expected)
-            count = self._start_count(expected, state) if state else 0
-            updates = parse_session_jsonl(expected, session_id)[count:]
-            return updates, (
-                f"[openclaw-acp-shim] session JSONL mismatch: streamed "
-                f"{self.path.name}, stdout identified {expected.name}"
-            )
-        state = _file_state(expected) if expected else None
-        if expected and self.path is None and state:
-            self._select(expected, state)
-            updates = parse_session_jsonl(expected, session_id)
-            new = updates[self.count :]
-            self.count = len(updates)
-            return new, None
-        return self.poll(session_id), None
-
-
-class _PromptState:
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.token = None
-        self.worker = None
-        self.process = None
-        self.cancelled = False
-
-    def reserve(self, token) -> bool:
-        with self.lock:
-            if self.token is not None:
-                return False
-            self.token = token
-            self.cancelled = False
-            return True
-
-    def set_worker(self, token, worker) -> None:
-        with self.lock:
-            if self.token == token:
-                self.worker = worker
-
-    def publish(self, token, process) -> bool:
-        with self.lock:
-            if self.token == token:
-                self.process = process
-            return self.token != token or self.cancelled
-
-    def cancel(self) -> None:
-        with self.lock:
-            if self.token is not None:
-                self.cancelled = True
-
-    def is_cancelled(self, token) -> bool:
-        with self.lock:
-            return self.token == token and self.cancelled
-
-    def active(self) -> bool:
-        with self.lock:
-            return self.token is not None
-
-    def finish(self, token) -> None:
-        with self.lock:
-            if self.token == token:
-                self.token = self.worker = self.process = None
-                self.cancelled = False
-
-    def worker_snapshot(self):
-        with self.lock:
-            return self.worker
-
-
-def _terminate_process_group(proc, grace: float = _TERMINATE_GRACE) -> None:
-    deadline = time.monotonic() + grace
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        group_alive = False
-    else:
-        group_alive = True
-    while group_alive and time.monotonic() < deadline:
-        time.sleep(max(0, min(0.05, deadline - time.monotonic())))
-        try:
-            os.killpg(proc.pid, 0)
-        except ProcessLookupError:
-            group_alive = False
-    if group_alive:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    try:
-        proc.wait(timeout=grace)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-
-
-def _openclaw_session_id(stdout: str) -> str | None:
-    try:
-        data = json.loads(stdout.strip())
-        return data.get("meta", {}).get("agentMeta", {}).get("sessionId")
-    except (json.JSONDecodeError, AttributeError, TypeError):
-        match = re.search(r'"sessionId"\s*:\s*"([^"]+)"', stdout)
-        return match.group(1) if match else None
-
-
-def _thought(session_id: str, text: str) -> None:
-    send(
-        {
-            "jsonrpc": "2.0",
-            "method": "session/update",
-            "params": {
-                "sessionId": session_id,
-                "update": {
-                    "sessionUpdate": "agent_thought",
-                    "text": text[:_DIAG_TRUNCATE],
-                },
-            },
-        }
-    )
-
-
 def _run_prompt(
     state: _PromptState,
     token,
@@ -870,94 +514,19 @@ def _run_prompt(
     timeout: float = _PROMPT_TIMEOUT,
     poll_interval: float = _POLL_INTERVAL,
 ) -> None:
-    proc = None
-    cancelled = False
-    tailer = _SessionTailer(sessions_dir)
-    try:
-        with (
-            tempfile.TemporaryFile() as stdout_file,
-            tempfile.TemporaryFile() as stderr_file,
-        ):
-            proc = subprocess.Popen(
-                command,
-                stdout=stdout_file,
-                stderr=stderr_file,
-                env=env,
-                start_new_session=True,
-            )
-            cancelled = state.publish(token, proc)
-            deadline = time.monotonic() + timeout
-            while proc.poll() is None:
-                for update in tailer.poll(session_id):
-                    send(update)
-                cancelled = cancelled or state.is_cancelled(token)
-                timed_out = time.monotonic() >= deadline
-                if cancelled or timed_out:
-                    _terminate_process_group(proc)
-                    break
-                time.sleep(poll_interval)
-            else:
-                proc.wait()
-
-            stdout_file.flush()
-            stderr_file.flush()
-            stdout_file.seek(0)
-            stderr_file.seek(0)
-            stdout = stdout_file.read(_CAPTURE_LIMIT).decode(errors="replace")
-            stderr = stderr_file.read(_DIAG_TRUNCATE + 1).decode(errors="replace")
-
-            if stderr.strip():
-                _thought(session_id, f"[openclaw stderr]\n{stderr}")
-
-            oc_session_id = _openclaw_session_id(stdout)
-            updates, diagnostic = tailer.drain(session_id, oc_session_id)
-            for update in updates:
-                send(update)
-            if diagnostic:
-                _thought(session_id, diagnostic)
-
-            if tailer.path is None:
-                try:
-                    agent_text = (
-                        json.loads(stdout).get("payloads", [{}])[0].get("text", "")
-                    )
-                except (json.JSONDecodeError, AttributeError, IndexError, KeyError):
-                    agent_text = stdout[:_DIAG_TRUNCATE]
-                if agent_text:
-                    send(
-                        {
-                            "jsonrpc": "2.0",
-                            "method": "session/update",
-                            "params": {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "text_update",
-                                    "text": agent_text,
-                                },
-                            },
-                        }
-                    )
-
-            cancelled = cancelled or state.is_cancelled(token)
-            send(
-                {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {"stopReason": "cancelled" if cancelled else "end_turn"},
-                }
-            )
-    except Exception as exc:
-        if proc is not None and proc.poll() is None:
-            _terminate_process_group(proc)
-        send(
-            {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {"code": -32603, "message": str(exc)},
-            }
-        )
-    finally:
-        state.finish(token)
+    run_prompt(
+        state,
+        token,
+        request_id,
+        session_id,
+        command,
+        env,
+        sessions_dir,
+        send=send,
+        terminate=_terminate_process_group,
+        timeout=timeout,
+        poll_interval=poll_interval,
+    )
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
