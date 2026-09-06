@@ -347,29 +347,36 @@ def test_cancel_before_spawn_is_honored(shim, monkeypatch, tmp_path) -> None:
     }
 
 
-def test_final_drain_and_large_capture_do_not_deadlock(
+def test_native_failure_drains_large_capture_before_error(
     shim, monkeypatch, tmp_path
 ) -> None:
-    """Guards agents PR #73 final draining when child output exceeds pipe size."""
+    """Guards agents PR #73 large-output draining and honest native-exit errors."""
     code = f"""
 import json, pathlib, sys
 d = pathlib.Path(sys.argv[1]); (d / 'final.jsonl').write_text({(_row("final") + chr(10))!r})
-sys.stderr.write('x' * 100000)
+sys.stderr.write('unsupported thinking: ' + 'x' * 100000)
 print('y' * 100000)
 print(json.dumps({{'meta': {{'agentMeta': {{'sessionId': 'final'}}}}}}))
+sys.exit(2)
 """
-    _, worker, sent, _ = _prompt_thread(shim, monkeypatch, tmp_path, code)
+    state, worker, sent, _ = _prompt_thread(shim, monkeypatch, tmp_path, code)
     worker.join(3)
     assert not worker.is_alive()
-    assert any(
-        m.get("params", {}).get("update", {}).get("text") == "final" for m in sent
+    assert not state.active()
+    final = next(
+        m for m in sent if m.get("params", {}).get("update", {}).get("text") == "final"
     )
+    response = next(m for m in sent if m.get("id") == 3)
+    assert response["error"]["code"] == -32603
+    assert "code 2: unsupported thinking" in response["error"]["message"]
+    assert sent.index(final) < sent.index(response)
     diagnostic = next(
         m
         for m in sent
         if m.get("params", {}).get("update", {}).get("sessionUpdate") == "agent_thought"
     )
     assert len(diagnostic["params"]["update"]["text"]) <= shim._DIAG_TRUNCATE
+    assert sent.index(diagnostic) < sent.index(response)
 
 
 def test_timeout_drains_update_and_preserves_end_turn(
@@ -422,7 +429,7 @@ def test_normal_stdout_fallback_is_preserved(shim, monkeypatch, tmp_path) -> Non
 
 def test_prompt_reaps_before_bounded_capture_reads(shim, monkeypatch, tmp_path) -> None:
     """Guards agents PR #73 bounded reads after process reaping."""
-    proc = SimpleNamespace(pid=123, waited=False, poll=lambda: 0)
+    proc = SimpleNamespace(pid=123, waited=False, returncode=0, poll=lambda: 0)
 
     def wait(timeout=None):
         proc.waited = True
@@ -452,6 +459,9 @@ def test_prompt_reaps_before_bounded_capture_reads(shim, monkeypatch, tmp_path) 
     shim._run_prompt(state, token, 3, "s", ("openclaw",), {}, tmp_path)
     assert read_limits == [shim._CAPTURE_LIMIT, shim._DIAG_TRUNCATE + 1]
     assert any(m.get("params", {}).get("update", {}).get("text") == "ok" for m in sent)
+    assert next(m for m in sent if m.get("id") == 3)["result"] == {
+        "stopReason": "end_turn"
+    }
 
 
 def test_prompt_spawn_error_is_protocol_error(shim, monkeypatch, tmp_path) -> None:
@@ -519,23 +529,3 @@ def test_active_prompt_rejects_mutating_requests(shim, monkeypatch) -> None:
     assert not any(m.get("id", object()) is None for m in sent)
     assert cancel_calls == 3  # notification, request, EOF cleanup
     assert cancelled.is_set()
-
-
-def test_native_failure_is_error_after_diagnostics(shim, monkeypatch, tmp_path):
-    """Guards agents PR #73 against successful unsupported-effort exits."""
-    state, worker, sent, _ = _prompt_thread(
-        shim,
-        monkeypatch,
-        tmp_path,
-        "import sys; print('unsupported thinking', file=sys.stderr); sys.exit(2)",
-    )
-    worker.join(3)
-    assert not worker.is_alive()
-    assert not state.active()
-    response = next(m for m in sent if m.get("id") == 3)
-    assert response["error"]["code"] == -32603
-    assert "unsupported thinking" in response["error"]["message"]
-    assert "code 2" in response["error"]["message"]
-    assert sent.index(response) > next(
-        i for i, m in enumerate(sent) if m.get("method") == "session/update"
-    )
