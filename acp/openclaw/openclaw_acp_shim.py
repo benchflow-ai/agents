@@ -26,11 +26,25 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import openclaw_prompt as _prompt
+
+_CAPTURE_LIMIT = _prompt.CAPTURE_LIMIT
+_DIAG_TRUNCATE = _prompt.DIAG_TRUNCATE
+_POLL_INTERVAL = _prompt.POLL_INTERVAL
+_PROMPT_TIMEOUT = _prompt.PROMPT_TIMEOUT
+_TERMINATE_GRACE = _prompt.TERMINATE_GRACE
+_PromptState = _prompt.PromptState
+_SessionTailer = _prompt.SessionTailer
+parse_session_jsonl = _prompt.parse_session_jsonl
+run_prompt = _prompt.run_prompt
+_terminate_process_group = _prompt.terminate_process_group
 
 if TYPE_CHECKING:
     # Type-only; the shim must stay runnable without benchflow installed.
@@ -38,10 +52,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_DIAG_TRUNCATE = 2000  # max chars for diagnostic output in ACP updates
-_TOOL_RESULT_TRUNCATE = 1000  # max chars for tool result text
-_TOOL_INPUT_TRUNCATE = 500  # max chars for tool input echoed in ACP updates
 _OPENCLAW_BIN = "/opt/benchflow/bin/openclaw"
+_EFFORTS = ("native", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _effort_options(effort: str) -> list[dict]:
+    return [
+        {
+            "id": "effort",
+            "name": "Reasoning effort",
+            "type": "select",
+            "currentValue": effort,
+            "options": [{"value": value, "name": value} for value in _EFFORTS],
+        }
+    ]
+
 
 _PARAM_MAP = {
     "BENCHFLOW_MODEL_TEMPERATURE": "agents.defaults.params.temperature",
@@ -79,9 +104,14 @@ def _max_tokens_value(model: str, configured: str | None) -> str | None:
 # ── ACP stdio I/O ─────────────────────────────────────────────────────────────
 
 
+_SEND_LOCK = threading.Lock()
+
+
 def send(msg):
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
+    line = json.dumps(msg) + "\n"
+    with _SEND_LOCK:
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
 
 def recv():
@@ -486,167 +516,31 @@ def _resolve_bare_model_prefix(model: str) -> str:
     )
 
 
-# ── Session parsing ───────────────────────────────────────────────────────────
-
-
-def find_session_jsonl() -> Path | None:
-    """Find the most recent openclaw session JSONL file."""
-    home = os.environ.get("HOME", os.path.expanduser("~"))
-    sessions_dir = Path(home) / ".openclaw" / "agents" / "main" / "sessions"
-    if not sessions_dir.exists():
-        return None
-
-    jsonl_files = sorted(
-        sessions_dir.glob("*.jsonl"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
+def _run_prompt(
+    state: _PromptState,
+    token,
+    request_id,
+    session_id: str,
+    command: tuple[str, ...],
+    env: dict[str, str],
+    sessions_dir: Path,
+    *,
+    timeout: float = _PROMPT_TIMEOUT,
+    poll_interval: float = _POLL_INTERVAL,
+) -> None:
+    run_prompt(
+        state,
+        token,
+        request_id,
+        session_id,
+        command,
+        env,
+        sessions_dir,
+        send=send,
+        terminate=_terminate_process_group,
+        timeout=timeout,
+        poll_interval=poll_interval,
     )
-    # Skip .lock files
-    for f in jsonl_files:
-        if not f.name.endswith(".lock"):
-            return f
-    return None
-
-
-def parse_session_jsonl(path: Path, session_id: str) -> list[dict]:
-    """Parse openclaw session JSONL and convert to ACP session/update events.
-
-    openclaw JSONL format uses {type: "message", message: {role, content}} entries.
-    Roles: "user", "assistant", "toolResult"
-    Content blocks: text, tool_use, thinking (in assistant messages)
-    """
-    updates = []
-    try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                # openclaw format: {type: "message", message: {role, content}}
-                if entry.get("type") != "message":
-                    continue
-
-                msg = entry.get("message", {})
-                role = msg.get("role", "")
-                content = msg.get("content", [])
-
-                if role == "assistant" and isinstance(content, list):
-                    for block in content:
-                        block_type = block.get("type", "")
-
-                        if block_type in ("text",):
-                            updates.append(
-                                {
-                                    "jsonrpc": "2.0",
-                                    "method": "session/update",
-                                    "params": {
-                                        "sessionId": session_id,
-                                        "update": {
-                                            "sessionUpdate": "text_update",
-                                            "text": block.get("text", ""),
-                                        },
-                                    },
-                                }
-                            )
-
-                        elif block_type in ("tool_use", "toolCall"):
-                            _input = block.get("input", block.get("arguments", {}))
-                            _title = _input.get(
-                                "command",
-                                _input.get("description", block.get("name", "tool")),
-                            )
-                            updates.append(
-                                {
-                                    "jsonrpc": "2.0",
-                                    "method": "session/update",
-                                    "params": {
-                                        "sessionId": session_id,
-                                        "update": {
-                                            "sessionUpdate": "tool_call",
-                                            "toolCallId": block.get("id", ""),
-                                            "kind": block.get("name", "tool"),
-                                            "title": _title,
-                                            "status": "completed",
-                                            "content": [
-                                                {
-                                                    "type": "content",
-                                                    "content": {
-                                                        "type": "text",
-                                                        "text": json.dumps(_input)[
-                                                            :_TOOL_INPUT_TRUNCATE
-                                                        ],
-                                                    },
-                                                }
-                                            ],
-                                        },
-                                    },
-                                }
-                            )
-
-                        elif block_type == "thinking":
-                            updates.append(
-                                {
-                                    "jsonrpc": "2.0",
-                                    "method": "session/update",
-                                    "params": {
-                                        "sessionId": session_id,
-                                        "update": {
-                                            "sessionUpdate": "agent_thought",
-                                            "text": block.get("thinking", ""),
-                                        },
-                                    },
-                                }
-                            )
-
-                elif role == "toolResult":
-                    # Emit as tool_call_update (status=completed) to update
-                    # the tool_call record created by the tool_use block
-                    tool_id = msg.get("toolCallId", "")
-                    result_text = ""
-                    if isinstance(content, list):
-                        result_text = " ".join(
-                            b.get("text", "")
-                            for b in content
-                            if isinstance(b, dict) and b.get("type") == "text"
-                        )
-                    elif isinstance(content, str):
-                        result_text = content
-
-                    updates.append(
-                        {
-                            "jsonrpc": "2.0",
-                            "method": "session/update",
-                            "params": {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "tool_call_update",
-                                    "toolCallId": tool_id,
-                                    "status": "completed",
-                                    "content": [
-                                        {
-                                            "type": "content",
-                                            "content": {
-                                                "type": "text",
-                                                "text": result_text[
-                                                    :_TOOL_RESULT_TRUNCATE
-                                                ],
-                                            },
-                                        }
-                                    ],
-                                },
-                            },
-                        }
-                    )
-
-    except Exception:
-        logger.debug("Failed to parse session JSONL for trajectory", exc_info=True)
-
-    return updates
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -657,16 +551,41 @@ def main():
     setup_gcloud_adc()
     session_id = "openclaw-shim"
     cwd = "/app"
+    prompt_state = _PromptState()
+    effort = "native"
 
     while True:
         try:
             msg = recv()
         except EOFError:
+            prompt_state.cancel()
+            worker = prompt_state.worker_snapshot()
+            if worker:
+                worker.join(2 * _TERMINATE_GRACE + 1)
+                if worker.is_alive():
+                    print(
+                        "[openclaw-acp-shim] prompt worker still stopping after stdin EOF",
+                        file=sys.stderr,
+                        flush=True,
+                    )
             break
 
         method = msg.get("method", "")
         req_id = msg.get("id")
         params = msg.get("params", {})
+
+        if (
+            method in ("session/new", "session/set_model", "session/set_config_option")
+            and prompt_state.active()
+        ):
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32600, "message": "prompt already active"},
+                }
+            )
+            continue
 
         if method == "initialize":
             send(
@@ -688,11 +607,40 @@ def main():
             cwd = params.get("cwd", "/app")
             setup_workspace(cwd)
             session_id = "openclaw-shim"
+            effort = "native"
             send(
                 {
                     "jsonrpc": "2.0",
                     "id": req_id,
-                    "result": {"sessionId": session_id},
+                    "result": {
+                        "sessionId": session_id,
+                        "configOptions": _effort_options(effort),
+                    },
+                }
+            )
+
+        elif method == "session/set_config_option":
+            value = params.get("value")
+            if params.get("configId") != "effort" or value not in _EFFORTS:
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {
+                            "code": -32602,
+                            "message": "invalid effort config option or value",
+                        },
+                    }
+                )
+                continue
+            effort = value
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "configOptions": _effort_options(effort),
+                    },
                 }
             )
 
@@ -810,146 +758,62 @@ def main():
                 if isinstance(part, dict) and part.get("type") == "text":
                     text += part.get("text", "")
 
+            token = object()
+            if not prompt_state.reserve(token):
+                send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32600, "message": "prompt already active"},
+                    }
+                )
+                continue
+            command = (
+                _OPENCLAW_BIN,
+                "agent",
+                "--local",
+                "--agent",
+                "main",
+                "--json",
+                "-m",
+                text,
+                "--timeout",
+                "900",
+            )
+            if effort != "native":
+                command += ("--thinking", "off" if effort == "none" else effort)
+            home = os.environ.get("HOME", os.path.expanduser("~"))
+            sessions_dir = Path(home) / ".openclaw" / "agents" / "main" / "sessions"
+            worker = threading.Thread(
+                target=_run_prompt,
+                args=(
+                    prompt_state,
+                    token,
+                    req_id,
+                    session_id,
+                    command,
+                    dict(os.environ),
+                    sessions_dir,
+                ),
+                name="openclaw-prompt",
+            )
+            prompt_state.set_worker(token, worker)
             try:
-                result = subprocess.run(
-                    [
-                        _OPENCLAW_BIN,
-                        "agent",
-                        "--local",
-                        "--agent",
-                        "main",
-                        "--json",
-                        "-m",
-                        text,
-                        "--timeout",
-                        "900",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=920,
-                    env={**os.environ},
-                )
-
-                # Surface stderr as agent thought (for debugging)
-                if result.stderr and result.stderr.strip():
-                    send(
-                        {
-                            "jsonrpc": "2.0",
-                            "method": "session/update",
-                            "params": {
-                                "sessionId": session_id,
-                                "update": {
-                                    "sessionUpdate": "agent_thought",
-                                    "text": f"[openclaw stderr]\n{result.stderr[:_DIAG_TRUNCATE]}",
-                                },
-                            },
-                        }
-                    )
-
-                # Parse openclaw's session JSONL for full trajectory
-                # Extract session ID from JSON output (may be multi-line)
-                oc_session_id = None
-                try:
-                    # openclaw --json output can be multi-line pretty-printed
-                    stdout = result.stdout.strip()
-                    if stdout:
-                        response_data = json.loads(stdout)
-                        oc_session_id = (
-                            response_data.get("meta", {})
-                            .get("agentMeta", {})
-                            .get("sessionId")
-                        )
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    # Try finding sessionId in raw output
-                    import re
-
-                    m = re.search(r'"sessionId"\s*:\s*"([^"]+)"', result.stdout or "")
-                    if m:
-                        oc_session_id = m.group(1)
-
-                # Find session JSONL: try specific ID first, then most recent
-                session_jsonl = None
-                home = os.environ.get("HOME", os.path.expanduser("~"))
-                sessions_dir = Path(home) / ".openclaw" / "agents" / "main" / "sessions"
-
-                if oc_session_id:
-                    specific = sessions_dir / f"{oc_session_id}.jsonl"
-                    if specific.exists():
-                        session_jsonl = specific
-
-                if not session_jsonl:
-                    session_jsonl = find_session_jsonl()
-
-                # Fallback: scan directory for most recent JSONL
-                if not session_jsonl and sessions_dir.exists():
-                    for jf in sorted(
-                        sessions_dir.glob("*.jsonl"),
-                        key=lambda f: f.stat().st_mtime,
-                        reverse=True,
-                    ):
-                        if jf.name not in ("sessions.json",) and not jf.name.endswith(
-                            ".lock"
-                        ):
-                            session_jsonl = jf
-                            break
-
-                if session_jsonl:
-                    updates = parse_session_jsonl(session_jsonl, session_id)
-                    for update in updates:
-                        send(update)
-
-                # If no JSONL trajectory, fall back to text response
-                if not session_jsonl:
-                    try:
-                        response = json.loads(result.stdout)
-                        agent_text = response.get("payloads", [{}])[0].get("text", "")
-                    except (json.JSONDecodeError, IndexError, KeyError):
-                        agent_text = (
-                            result.stdout[:_DIAG_TRUNCATE] if result.stdout else ""
-                        )
-
-                    if agent_text:
-                        send(
-                            {
-                                "jsonrpc": "2.0",
-                                "method": "session/update",
-                                "params": {
-                                    "sessionId": session_id,
-                                    "update": {
-                                        "sessionUpdate": "text_update",
-                                        "text": agent_text,
-                                    },
-                                },
-                            }
-                        )
-
+                worker.start()
+            except Exception as exc:
+                prompt_state.finish(token)
                 send(
                     {
                         "jsonrpc": "2.0",
                         "id": req_id,
-                        "result": {"stopReason": "end_turn"},
-                    }
-                )
-
-            except subprocess.TimeoutExpired:
-                send(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "result": {"stopReason": "end_turn"},
-                    }
-                )
-            except Exception as e:
-                send(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "error": {"code": -32603, "message": str(e)},
+                        "error": {"code": -32603, "message": str(exc)},
                     }
                 )
 
         elif method == "session/cancel":
-            send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+            prompt_state.cancel()
+            if req_id is not None:
+                send({"jsonrpc": "2.0", "id": req_id, "result": {}})
 
         elif method == "session/request_permission":
             options = params.get("options", [])
