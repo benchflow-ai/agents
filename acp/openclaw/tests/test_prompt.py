@@ -488,6 +488,11 @@ def test_active_prompt_rejects_mutating_requests(shim, monkeypatch) -> None:
             {"id": 2, "method": "session/prompt", "params": {"prompt": []}},
             {"id": 3, "method": "session/new", "params": {"cwd": "/tmp"}},
             {"id": 4, "method": "session/set_model", "params": {"modelId": "x"}},
+            {
+                "id": 6,
+                "method": "session/set_config_option",
+                "params": {"configId": "effort", "value": "low"},
+            },
             {"method": "session/cancel", "params": {}},
             {"id": 5, "method": "session/cancel", "params": {}},
         ]
@@ -508,13 +513,29 @@ def test_active_prompt_rejects_mutating_requests(shim, monkeypatch) -> None:
     monkeypatch.setattr(shim, "send", sent.append)
     shim.main()
     assert [
-        next(m for m in sent if m.get("id") == i)["error"]["code"] for i in (2, 3, 4)
-    ] == [
-        -32600,
-        -32600,
-        -32600,
-    ]
+        next(m for m in sent if m.get("id") == i)["error"]["code"] for i in (2, 3, 4, 6)
+    ] == [-32600] * 4
     assert next(m for m in sent if m.get("id") == 5)["result"] == {}
     assert not any(m.get("id", object()) is None for m in sent)
     assert cancel_calls == 3  # notification, request, EOF cleanup
     assert cancelled.is_set()
+
+
+def test_native_failure_is_error_after_diagnostics(shim, monkeypatch, tmp_path):
+    """Guards agents PR #73 against successful unsupported-effort exits."""
+    state, worker, sent, _ = _prompt_thread(
+        shim,
+        monkeypatch,
+        tmp_path,
+        "import sys; print('unsupported thinking', file=sys.stderr); sys.exit(2)",
+    )
+    worker.join(3)
+    assert not worker.is_alive()
+    assert not state.active()
+    response = next(m for m in sent if m.get("id") == 3)
+    assert response["error"]["code"] == -32603
+    assert "unsupported thinking" in response["error"]["message"]
+    assert "code 2" in response["error"]["message"]
+    assert sent.index(response) > next(
+        i for i, m in enumerate(sent) if m.get("method") == "session/update"
+    )

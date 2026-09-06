@@ -519,6 +519,11 @@ def run_prompt(
                     )
 
             cancelled = cancelled or state.cancelled_for(token)
+            if not cancelled and not timed_out and proc.returncode:
+                raise RuntimeError(
+                    f"OpenClaw exited with code {proc.returncode}: "
+                    f"{(stderr.strip() or stdout.strip())[:DIAG_TRUNCATE]}"
+                )
             if timed_out and not cancelled:
                 message = f"OpenClaw prompt timed out after {timeout:g}s"
                 _thought(send, session_id, f"[openclaw-acp-shim] {message}")

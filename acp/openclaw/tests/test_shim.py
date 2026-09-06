@@ -541,3 +541,53 @@ def test_set_model_writes_generation_params_and_surfaces_failure(
     )
     assert "topP failed" in thought["params"]["update"]["text"]
     assert "topP failed" in capsys.readouterr().err
+
+
+def test_effort_config_drives_prompt_and_resets(shim, monkeypatch):
+    """Guards agents PR #73 effort selection, validation and new-session reset."""
+    sent, commands = [], []
+    requests = [
+        ("new", {}),
+        ("set_config_option", {"configId": "effort", "value": "low"}),
+        ("set_config_option", {"configId": "unknown", "value": "high"}),
+        ("set_config_option", {"configId": "effort", "value": []}),
+        ("prompt", {}),
+        ("set_config_option", {"configId": "effort", "value": "none"}),
+        ("prompt", {}),
+        ("set_config_option", {"configId": "effort", "value": "native"}),
+        ("prompt", {}),
+        ("set_config_option", {"configId": "effort", "value": "high"}),
+        ("new", {}),
+        ("prompt", {}),
+    ]
+    inbox = iter(
+        {"id": i, "method": f"session/{method}", "params": params}
+        for i, (method, params) in enumerate(requests, 1)
+    )
+
+    def run(state, token, request_id, session_id, command, *args):
+        commands.append(command)
+        state.finish(token)
+
+    monkeypatch.setattr(shim, "recv", lambda: next(inbox))
+    monkeypatch.setattr(shim, "send", sent.append)
+    monkeypatch.setattr(shim, "setup_openai_auth", lambda: None)
+    monkeypatch.setattr(shim, "setup_gcloud_adc", lambda: None)
+    monkeypatch.setattr(shim, "setup_workspace", lambda cwd: None)
+    monkeypatch.setattr(shim, "_run_prompt", run)
+    monkeypatch.setattr(
+        shim.threading,
+        "Thread",
+        lambda target, args, **kwargs: SimpleNamespace(start=lambda: target(*args)),
+    )
+    with pytest.raises(StopIteration):
+        shim.main()
+    replies = {m["id"]: m for m in sent}
+    assert [
+        replies[i]["result"]["configOptions"][0]["currentValue"]
+        for i in (1, 2, 6, 8, 11)
+    ] == ["native", "low", "none", "native", "native"]
+    assert all(replies[i]["error"]["code"] == -32602 for i in (3, 4))
+    assert commands[0][-2:] == ("--thinking", "low")
+    assert commands[1][-2:] == ("--thinking", "off")
+    assert all("--thinking" not in command for command in commands[2:])

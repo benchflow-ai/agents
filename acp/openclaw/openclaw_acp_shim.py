@@ -53,6 +53,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _OPENCLAW_BIN = "/opt/benchflow/bin/openclaw"
+_EFFORTS = ("native", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+
+def _effort_options(effort: str) -> list[dict]:
+    return [
+        {
+            "id": "effort",
+            "name": "Reasoning effort",
+            "type": "select",
+            "currentValue": effort,
+            "options": [{"value": value, "name": value} for value in _EFFORTS],
+        }
+    ]
+
 
 _PARAM_MAP = {
     "BENCHFLOW_MODEL_TEMPERATURE": "agents.defaults.params.temperature",
@@ -538,6 +552,7 @@ def main():
     session_id = "openclaw-shim"
     cwd = "/app"
     prompt_state = _PromptState()
+    effort = "native"
 
     while True:
         try:
@@ -559,6 +574,19 @@ def main():
         req_id = msg.get("id")
         params = msg.get("params", {})
 
+        if (
+            method in ("session/new", "session/set_model", "session/set_config_option")
+            and prompt_state.active()
+        ):
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": {"code": -32600, "message": "prompt already active"},
+                }
+            )
+            continue
+
         if method == "initialize":
             send(
                 {
@@ -576,36 +604,47 @@ def main():
             )
 
         elif method == "session/new":
-            if prompt_state.active():
-                send(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "error": {"code": -32600, "message": "prompt already active"},
-                    }
-                )
-                continue
             cwd = params.get("cwd", "/app")
             setup_workspace(cwd)
             session_id = "openclaw-shim"
+            effort = "native"
             send(
                 {
                     "jsonrpc": "2.0",
                     "id": req_id,
-                    "result": {"sessionId": session_id},
+                    "result": {
+                        "sessionId": session_id,
+                        "configOptions": _effort_options(effort),
+                    },
                 }
             )
 
-        elif method == "session/set_model":
-            if prompt_state.active():
+        elif method == "session/set_config_option":
+            value = params.get("value")
+            if params.get("configId") != "effort" or value not in _EFFORTS:
                 send(
                     {
                         "jsonrpc": "2.0",
                         "id": req_id,
-                        "error": {"code": -32600, "message": "prompt already active"},
+                        "error": {
+                            "code": -32602,
+                            "message": "invalid effort config option or value",
+                        },
                     }
                 )
                 continue
+            effort = value
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": {
+                        "configOptions": _effort_options(effort),
+                    },
+                }
+            )
+
+        elif method == "session/set_model":
             model = params.get("modelId", "")
             requested_model = model
             # A provider-resolution / config-write failure here must NOT crash the
@@ -741,6 +780,8 @@ def main():
                 "--timeout",
                 "900",
             )
+            if effort != "native":
+                command += ("--thinking", "off" if effort == "none" else effort)
             home = os.environ.get("HOME", os.path.expanduser("~"))
             sessions_dir = Path(home) / ".openclaw" / "agents" / "main" / "sessions"
             worker = threading.Thread(
