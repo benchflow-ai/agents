@@ -103,6 +103,7 @@ it captures sets the [tier](#tiers-how-faithfully-can-we-host-it). Two routes:
    [`acp/<id>/manifest.toml`](acp/) and classify it in
    [`acp-registry`](acp-registry/src/acp_registry/catalog.py); no adapter code. The
    `contract/` tests validate the manifest. ([docs/adaptation.md](docs/adaptation.md))
+   benchflow core's `antigravity` (`agy`) has no manifest on purpose: it needs core-only web-tool and MCP policy that a manifest cannot carry, and released benchflow 0.7.x would auto-load a manifest without it. A `contract/` test fails if one is added.
 2. **Needs an adapter** (a TUI, an SDK agent, a non-ACP harness) — write an ACP
    server + `register.py`. Scaffold from `ai-sdk/acp`:
    `python skills/adaptation-parity/scripts/scaffold_ai_sdk_agent.py <name>`.
