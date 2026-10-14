@@ -10,6 +10,7 @@ skill_paths = [
 ]
 home_dirs = [
     ".opencode",
+    ".config/opencode",
 ]
 
 [env_mapping]
