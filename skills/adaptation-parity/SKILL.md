@@ -45,11 +45,17 @@ requests.
 
 ```bash
 # standalone capture (drive the agent's server directly at the mock):
-node scripts/acp_capture.mjs --server <path/to/server.mjs> --out /tmp/outside.jsonl
+node scripts/acp_capture.mjs --launch "<agent ACP command>" --out /tmp/outside.jsonl
+# Existing Node adapters may continue using: --server <path/to/server.mjs>
 # inside-benchflow capture: run the registered agent on the same task with the
 # gateway pointed at the same mock (see scripts/README), capturing /tmp/inside.jsonl
 python scripts/parity_diff.py /tmp/outside.jsonl /tmp/inside.jsonl
 ```
+
+`--launch` executes a trusted local command through POSIX `/bin/sh -c`.
+Standalone capture supports OpenAI-compatible `/chat/completions` agents. It
+launches the agent with a disposable home directory, removes inherited provider
+routing/auth variables, then injects mock routing variables before launch.
 
 `parity_diff.py` normalizes the **expected-neutral** differences (gateway
 model-alias rename; sandbox cwd vs local; `content:null` vs omitted from proxy
