@@ -8,6 +8,7 @@ and base64-deployed into the sandbox by the install command.
 """
 
 import base64
+import inspect
 from pathlib import Path
 
 from benchflow.agents.registry import (
@@ -89,6 +90,20 @@ def _launch_cmd() -> str:
     )
 
 
+def _cache_kwargs() -> dict[str, str]:
+    """Mark the install as pinned where BenchFlow can cache it.
+
+    Every package is pinned (requirements.txt), so BenchFlow releases whose
+    ``register_agent`` takes ``cacheable_version`` build the install once into
+    a cached image layer per task image and reuse it, instead of installing in
+    every trial. Older releases install in every trial, as before.
+    """
+    if "cacheable_version" not in inspect.signature(register_agent).parameters:
+        return {}
+    version = f"{MINI_SWE_AGENT_VERSION}+litellm-{LITELLM_VERSION}"
+    return {"cacheable_version": version}
+
+
 def register() -> None:
     """Register the ``mini-swe`` agent (and its aliases) into BenchFlow."""
     register_agent(
@@ -105,6 +120,7 @@ def register() -> None:
             "mini-swe-agent via ACP shim — minimal single-bash-tool harness "
             "(multi-model via litellm)"
         ),
+        **_cache_kwargs(),
     )
     for alias in _ALIASES:
         AGENT_ALIASES.setdefault(alias, "mini-swe")

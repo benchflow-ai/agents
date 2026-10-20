@@ -62,3 +62,20 @@ def test_install_ends_with_a_tool_call_probe():
     assert "mock_response='ok'" in probe
     assert "LITELLM_LOCAL_MODEL_COST_MAP=True" in probe
     compile(register._TOOL_CALL_PROBE, "<probe>", "exec")
+
+
+def test_the_pinned_install_is_offered_for_caching_when_benchflow_can(monkeypatch):
+    def new_register_agent(name, install_cmd, launch_cmd, *, cacheable_version=""):
+        return None
+
+    def old_register_agent(name, install_cmd, launch_cmd):
+        return None
+
+    monkeypatch.setattr(register, "register_agent", new_register_agent)
+    assert register._cache_kwargs() == {
+        "cacheable_version": (
+            f"{register.MINI_SWE_AGENT_VERSION}+litellm-{register.LITELLM_VERSION}"
+        )
+    }
+    monkeypatch.setattr(register, "register_agent", old_register_agent)
+    assert register._cache_kwargs() == {}
