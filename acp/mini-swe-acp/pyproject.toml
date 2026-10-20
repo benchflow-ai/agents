@@ -1,14 +1,16 @@
 [project]
 name = "mini-swe-acp"
-version = "0.1.0"
+version = "0.1.1"
 description = "mini-swe-agent as a BenchFlow agent — ACP shim + registration"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 dependencies = [
-    # >=0.5.2: register.py needs the registry helpers (_apt_install, ...).
+    # Requires the private uv bootstrap (uv_install_command(install_packages=False),
+    # PY8-D1000-lead), on BenchFlow's 0.8 line from its dev builds on. A higher
+    # floor would make a dependency-resolving install replace a dev BenchFlow.
     # benchflow pins litellm to an rc — uv users: --prerelease=allow.
-    "benchflow>=0.5.2",
+    "benchflow>=0.8.0.dev0",
     "pyyaml>=6",
 ]
 

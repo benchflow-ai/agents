@@ -39,7 +39,9 @@ Prefer no import side effects? Call `mini_swe_acp.register()` explicitly.
 
 - `register.py` registers `mini-swe` (aliases `mini`, `minisweagent`,
   `mini-swe-agent`) with install/launch commands. The install command creates an
-  isolated venv in the sandbox, pip-installs `mini-swe-agent` 2.4.6 and LiteLLM
+  isolated venv under `/opt/benchflow`, using BenchFlow 0.8.3's checked uv
+  0.13.1 and managed CPython 3.12.15. It leaves system packages and tool PATH
+  alone, invokes the private Python by absolute path, and pip-installs `mini-swe-agent` 2.4.6 and LiteLLM
   1.105.1 with every dependency at an exact version (`requirements.txt`),
   base64-deploys `acp_shim.py`, and then makes one mocked LiteLLM completion with
   a tool, the call mini-swe makes on every step, so a missing dependency fails

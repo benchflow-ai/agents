@@ -45,8 +45,13 @@ def test_install_writes_the_pinned_list_and_installs_only_it():
     )
     assert encoded, cmd
     assert base64.b64decode(encoded.group(1)).decode() == _REQUIREMENTS.read_text()
-    assert "pip install -q -r /opt/benchflow/mini-swe-requirements.txt" in cmd
-    assert f"pip install -q pip=={register.PIP_VERSION}" in cmd
+    assert (
+        "pip --isolated install -q -r /opt/benchflow/mini-swe-requirements.txt" in cmd
+    )
+    assert (
+        f"pip install -q --python {register._MINI_SWE_VENV}/bin/python pip=={register.PIP_VERSION}"
+        in cmd
+    )
     # No bare, unversioned install of the agent or of LiteLLM is left.
     assert not re.search(
         r"pip install( -q)?( --upgrade)? (mini-swe-agent|litellm)\b", cmd
@@ -75,7 +80,27 @@ def test_the_pinned_install_is_offered_for_caching_when_benchflow_can(monkeypatc
     assert register._cache_kwargs() == {
         "cacheable_version": (
             f"{register.MINI_SWE_AGENT_VERSION}+litellm-{register.LITELLM_VERSION}"
+            f"+private-python-{register.PYTHON_VERSION}-uv-{register.UV_VERSION}-v1"
         )
     }
     monkeypatch.setattr(register, "register_agent", old_register_agent)
     assert register._cache_kwargs() == {}
+
+
+def test_private_runtime_never_installs_task_system_packages():
+    """Guards PY8-D1000 / agents PR #80's system-Python regression."""
+    cmd = register._install_cmd()
+    for forbidden in (
+        "apt-get",
+        "apk add",
+        "dnf ",
+        "yum ",
+        "python3 -m venv",
+        "export PATH=",
+    ):
+        assert forbidden not in cmd
+    assert "--no-bin --reinstall 3.12.15" in cmd
+    assert "UV_PYTHON_PREFERENCE=only-managed" in cmd
+    assert register._launch_cmd().endswith(
+        "/opt/benchflow/mini-swe-venv/bin/python /opt/benchflow/bin/mini-swe-acp-shim"
+    )
