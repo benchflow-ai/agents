@@ -39,8 +39,11 @@ Prefer no import side effects? Call `mini_swe_acp.register()` explicitly.
 
 - `register.py` registers `mini-swe` (aliases `mini`, `minisweagent`,
   `mini-swe-agent`) with install/launch commands. The install command creates an
-  isolated venv in the sandbox, pip-installs `mini-swe-agent`, and base64-deploys
-  `acp_shim.py`.
+  isolated venv in the sandbox, pip-installs `mini-swe-agent` 2.4.6 and LiteLLM
+  1.105.1 with every dependency at an exact version (`requirements.txt`),
+  base64-deploys `acp_shim.py`, and then makes one mocked LiteLLM completion with
+  a tool, the call mini-swe makes on every step, so a missing dependency fails
+  the install instead of every model call.
 - `acp_shim.py` runs mini-swe's own `DefaultAgent` loop in-process against the
   task checkout and re-emits each step as ACP `session/update` notifications so
   BenchFlow captures the trajectory. The agent's bundled `mini.yaml` config is

@@ -26,7 +26,10 @@ dev = [
     "pytest>=8",
     "ruff>=0.15",
     "ty",
-    "mini-swe-agent",
+    # The version the sandbox install pins (src/mini_swe_acp/requirements.txt).
+    # LiteLLM is not pinned here: this env also holds benchflow, which pins its
+    # own LiteLLM for the host proxy.
+    "mini-swe-agent==2.4.6",
 ]
 
 [build-system]
