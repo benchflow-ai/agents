@@ -355,6 +355,8 @@ def main() -> None:
 
             try:
                 model = _build_model(config["model"], model_override)
+                # Launch uses an absolute private Python; never activate its
+                # venv or add its bin to the shell tool PATH.
                 env = LocalEnvironment(cwd=cwd, **config["environment"])
                 agent = acp_agent_class(
                     model,

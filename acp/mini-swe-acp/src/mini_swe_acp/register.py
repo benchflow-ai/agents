@@ -11,11 +11,22 @@ import base64
 import inspect
 from pathlib import Path
 
+from benchflow._root_only import root_only_tree_check
+from benchflow._uv_pin import (
+    PYTHON_INSTALL_DIR,
+    PYTHON_VERSION,
+    UV_BIN,
+    UV_VERSION,
+    managed_python_exports,
+    managed_python_install_command,
+    private_tmpdir_exports,
+    uv_install_command,
+    uv_lock_file_command,
+    uv_lock_seal_command,
+)
 from benchflow.agents.registry import (
     AGENT_ALIASES,
-    _apt_install,
     _BENCHFLOW_BIN_PREFIX,
-    _install_python_script,
     register_agent,
 )
 
@@ -65,19 +76,26 @@ def _write_file(container_path: str, text: str) -> str:
 def _install_cmd() -> str:
     python = f"{_MINI_SWE_VENV}/bin/python"
     return (
-        "export DEBIAN_FRONTEND=noninteractive && "
-        "( command -v python3 >/dev/null 2>&1 || "
-        f"  {_apt_install('python3', 'python3-venv', 'python3-pip')} ) && "
-        f"( [ -x {python} ] || "
-        f"  python3 -m venv {_MINI_SWE_VENV} || "
-        f"  ( {_apt_install('python3-venv')} && "
-        f"    python3 -m venv {_MINI_SWE_VENV} ) ) && "
-        f"{python} -m pip install -q pip=={PIP_VERSION} && "
-        "mkdir -p /opt/benchflow && "
+        # The proxy's checked uv and exact managed CPython, with no package
+        # installation into the task image (even when it lacks curl/Python).
+        f"{uv_install_command(install_packages=False)} && "
+        f"{{ {managed_python_exports()}; }} && "
+        f"{private_tmpdir_exports('/opt/benchflow/mini-swe-tmp')} && "
+        f"{{ {managed_python_install_command(UV_BIN)}; }} && "
+        f"mkdir -p {_MINI_SWE_VENV} {_BENCHFLOW_BIN_PREFIX} && "
+        f"{root_only_tree_check(_MINI_SWE_VENV, 'mini-swe venv')} && "
+        f"{root_only_tree_check(_BENCHFLOW_BIN_PREFIX, 'mini-swe shim')} && "
+        f"{UV_BIN} venv -q --clear --python {PYTHON_VERSION} {_MINI_SWE_VENV} && "
+        f"{uv_lock_file_command(_MINI_SWE_VENV)} && "
+        f"{UV_BIN} pip install -q --python {python} pip=={PIP_VERSION} && "
         f"{_write_file(_REQUIREMENTS_PATH, _REQUIREMENTS_SOURCE)} && "
-        f"{python} -m pip install -q -r {_REQUIREMENTS_PATH} && "
-        + _install_python_script(_SHIM_PATH, _SHIM_SOURCE)
-        + " && chmod -R a+rX /opt/benchflow && "
+        f"{python} -I -m pip --isolated install -q -r {_REQUIREMENTS_PATH} && "
+        # Staging a script must not install /usr/bin/python3. The launcher
+        # invokes the private interpreter explicitly; no shebang is needed.
+        f"{_write_file(_SHIM_PATH, _SHIM_SOURCE)} && "
+        f"{uv_lock_seal_command(_MINI_SWE_VENV)} && "
+        f"chmod -R a+rX {PYTHON_INSTALL_DIR} {_MINI_SWE_VENV} && "
+        f"chmod 644 {_SHIM_PATH} && "
         "cd / && MSWEA_SILENT_STARTUP=1 LITELLM_LOCAL_MODEL_COST_MAP=True "
         f'{python} -I -c "{_TOOL_CALL_PROBE}" >/dev/null'
     )
@@ -100,7 +118,10 @@ def _cache_kwargs() -> dict[str, str]:
     """
     if "cacheable_version" not in inspect.signature(register_agent).parameters:
         return {}
-    version = f"{MINI_SWE_AGENT_VERSION}+litellm-{LITELLM_VERSION}"
+    version = (
+        f"{MINI_SWE_AGENT_VERSION}+litellm-{LITELLM_VERSION}"
+        f"+private-python-{PYTHON_VERSION}-uv-{UV_VERSION}-v1"
+    )
     return {"cacheable_version": version}
 
 
