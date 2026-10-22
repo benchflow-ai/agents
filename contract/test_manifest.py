@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from manifest import ManifestError, load_manifest  # noqa: E402
+from manifest import ManifestError, load_manifest
 
 _MINIMAL = """\
 contract_version = "1.0"
@@ -86,7 +86,7 @@ def test_rejects_non_acp_protocol(tmp_path: Path) -> None:
 
 def test_rejects_incompatible_contract_major(tmp_path: Path) -> None:
     text = _MINIMAL.replace('"1.0"', '"2.0"')
-    with pytest.raises(ManifestError, match="supports 1.x"):
+    with pytest.raises(ManifestError, match=r"supports 1.x"):
         load_manifest(_write(tmp_path, text))
 
 

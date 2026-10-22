@@ -1,5 +1,6 @@
 """Every manifest must declare a unique agent name — duplicates make
 ``load_agents_from_dir`` raise and leave one agent silently unreachable."""
+
 import collections
 import tomllib
 from pathlib import Path

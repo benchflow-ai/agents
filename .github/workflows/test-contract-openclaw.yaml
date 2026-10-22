@@ -1,0 +1,39 @@
+name: contract-openclaw
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'acp/**/manifest.toml'
+      - 'acp/**/launcher.sh'
+      - 'acp/openclaw/**'
+      - 'contract/**'
+      - '.github/workflows/test-contract-openclaw.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'acp/**/manifest.toml'
+      - 'acp/**/launcher.sh'
+      - 'acp/openclaw/**'
+      - 'contract/**'
+      - '.github/workflows/test-contract-openclaw.yaml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install test tools
+        run: pip install jsonschema==4.25.1 pytest==8.4.2 ruff==0.15.15
+      - name: Contract tests
+        working-directory: contract
+        run: PYTHONPATH=. pytest -q
+      - name: OpenClaw tests
+        run: python -m pytest -q acp/openclaw/tests
+      - name: Lint and format
+        run: |
+          ruff check acp/openclaw contract
+          ruff format --check acp/openclaw contract
