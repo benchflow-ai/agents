@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -544,100 +543,51 @@ def test_set_model_writes_generation_params_and_surfaces_failure(
     assert "topP failed" in capsys.readouterr().err
 
 
-def test_parse_session_jsonl_emits_text_thought_tool_and_result(shim, tmp_path) -> None:
-    """Guards BenchFlow PR #1075 JSONL-to-ACP trajectory mapping."""
-    path = tmp_path / "session.jsonl"
-    rows = [
-        {
-            "type": "message",
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {"type": "thinking", "thinking": "plan"},
-                    {
-                        "type": "tool_use",
-                        "id": "t1",
-                        "name": "shell",
-                        "input": {"command": "pwd"},
-                    },
-                    {"type": "text", "text": "done"},
-                ],
-            },
-        },
-        {
-            "type": "message",
-            "message": {
-                "role": "toolResult",
-                "toolCallId": "t1",
-                "content": [{"type": "text", "text": "out"}],
-            },
-        },
+def test_effort_config_drives_prompt_and_resets(shim, monkeypatch):
+    """Guards agents PR #73 effort selection, validation and new-session reset."""
+    sent, commands = [], []
+    requests = [
+        ("new", {}),
+        ("set_config_option", {"configId": "effort", "value": "low"}),
+        ("set_config_option", {"configId": "unknown", "value": "high"}),
+        ("set_config_option", {"configId": "effort", "value": []}),
+        ("prompt", {}),
+        ("set_config_option", {"configId": "effort", "value": "none"}),
+        ("prompt", {}),
+        ("set_config_option", {"configId": "effort", "value": "native"}),
+        ("prompt", {}),
+        ("set_config_option", {"configId": "effort", "value": "high"}),
+        ("new", {}),
+        ("prompt", {}),
     ]
-    path.write_text("not-json\n" + "\n".join(json.dumps(row) for row in rows))
-
-    updates = shim.parse_session_jsonl(path, "session-1")
-
-    assert [u["params"]["update"]["sessionUpdate"] for u in updates] == [
-        "agent_thought",
-        "tool_call",
-        "text_update",
-        "tool_call_update",
-    ]
-    assert all(u["params"]["sessionId"] == "session-1" for u in updates)
-
-
-def test_parse_missing_session_is_safe_fallback(shim, tmp_path) -> None:
-    """Guards BenchFlow PR #1075 missing-trajectory fallback."""
-    assert shim.parse_session_jsonl(tmp_path / "missing.jsonl", "s") == []
-
-
-def _run_one_prompt(shim, monkeypatch, outcome) -> list[dict]:
     inbox = iter(
-        [
-            {"id": 1, "method": "initialize", "params": {}},
-            {
-                "id": 2,
-                "method": "session/new",
-                "params": {"cwd": "/tmp", "mcpServers": []},
-            },
-            {
-                "id": 3,
-                "method": "session/prompt",
-                "params": {"prompt": [{"type": "text", "text": "hi"}]},
-            },
-            {"id": 4, "method": "session/cancel", "params": {}},
-        ]
+        {"id": i, "method": f"session/{method}", "params": params}
+        for i, (method, params) in enumerate(requests, 1)
     )
+
+    def run(state, token, request_id, session_id, command, *args):
+        commands.append(command)
+        state.finish(token)
+
     monkeypatch.setattr(shim, "recv", lambda: next(inbox))
-    sent = []
     monkeypatch.setattr(shim, "send", sent.append)
-    monkeypatch.setattr(shim, "setup_workspace", lambda _: None)
-    monkeypatch.setattr(shim, "find_session_jsonl", lambda: None)
-    monkeypatch.setattr(shim.subprocess, "run", outcome)
+    monkeypatch.setattr(shim, "setup_openai_auth", lambda: None)
+    monkeypatch.setattr(shim, "setup_gcloud_adc", lambda: None)
+    monkeypatch.setattr(shim, "setup_workspace", lambda cwd: None)
+    monkeypatch.setattr(shim, "_run_prompt", run)
+    monkeypatch.setattr(
+        shim.threading,
+        "Thread",
+        lambda target, args, **kwargs: SimpleNamespace(start=lambda: target(*args)),
+    )
     with pytest.raises(StopIteration):
         shim.main()
-    return sent
-
-
-def test_prompt_subprocess_error_is_protocol_error(shim, monkeypatch) -> None:
-    """Guards BenchFlow PR #1075 subprocess error response."""
-
-    def fail(*args, **kwargs):
-        raise OSError("spawn failed")
-
-    sent = _run_one_prompt(shim, monkeypatch, fail)
-    assert any(
-        m.get("id") == 3 and m.get("error", {}).get("code") == -32603 for m in sent
-    )
-
-
-def test_prompt_timeout_returns_end_turn_then_cancel_ack(shim, monkeypatch) -> None:
-    """Guards BenchFlow PR #1075 blocking timeout/cancel semantics."""
-
-    def timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired(args[0], 920)
-
-    sent = _run_one_prompt(shim, monkeypatch, timeout)
-    prompt = next(m for m in sent if m.get("id") == 3)
-    assert prompt["result"] == {"stopReason": "end_turn"}
-    assert next(m for m in sent if m.get("id") == 4)["result"] == {}
+    replies = {m["id"]: m for m in sent}
+    assert [
+        replies[i]["result"]["configOptions"][0]["currentValue"]
+        for i in (1, 2, 6, 8, 11)
+    ] == ["native", "low", "none", "native", "native"]
+    assert all(replies[i]["error"]["code"] == -32602 for i in (3, 4))
+    assert commands[0][-2:] == ("--thinking", "low")
+    assert commands[1][-2:] == ("--thinking", "off")
+    assert all("--thinking" not in command for command in commands[2:])

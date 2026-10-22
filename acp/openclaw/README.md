@@ -37,3 +37,16 @@ Roll out agents change before deleting BenchFlow's built-in copy. Validate
 BenchFlow against local checkout first, then exact merged agents SHA. Roll back
 B by reverting BenchFlow to built-in shim. Roll back later agents changes via
 `BENCHFLOW_AGENTS_SOURCE=benchflow-ai/agents@<known-good-40-char-SHA>`.
+
+## Reasoning effort
+
+ACP sessions advertise `effort`: `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, `max`, plus initial `native` (omit the CLI override). `none` maps to
+OpenClaw `--thinking off`; other explicit values pass through unchanged.
+OpenClaw validates model support. Ordinary nonzero exits produce ACP errors;
+existing cancellation and timeout responses stay unchanged.
+
+Effort changes are rejected while a prompt runs. New ACP sessions clear the
+shim override; model changes and cancellation retain it. `native` does not
+reset any thinking setting persisted by the underlying OpenClaw session.
+BenchFlow must support discovery of the advertised effort option (#1093).

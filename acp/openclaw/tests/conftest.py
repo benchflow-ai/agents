@@ -30,8 +30,9 @@ def clean_shim_env(monkeypatch):
 
 
 @pytest.fixture
-def shim():
+def shim(monkeypatch):
     path = Path(__file__).resolve().parents[1] / "openclaw_acp_shim.py"
+    monkeypatch.syspath_prepend(str(path.parent))
     spec = importlib.util.spec_from_file_location("openclaw_acp_shim_under_test", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
