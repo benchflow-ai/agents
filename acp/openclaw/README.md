@@ -11,7 +11,7 @@ is canonical, readable source. `manifest.toml` installs identical bytes at
 - Node.js 22.20.0
 - `openclaw@2026.6.9`
 - OpenClaw native providers plus BenchFlow provider configuration passed via
-  `BENCHFLOW_PROVIDER_*`
+  `RUNTIME_PROVIDER_*` (`BENCHFLOW_PROVIDER_*` from older BenchFlow releases)
 
 Optional imports from `benchflow.agents.providers` are a compatibility seam.
 Shim uses provider-specific metadata when BenchFlow is installed, falling back

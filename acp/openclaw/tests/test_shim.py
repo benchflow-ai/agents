@@ -16,6 +16,7 @@ import pytest
         ("us-openai/gpt-5.4", 128000),
         ("azure-foundry-openai/gpt-5.4", 128000),
         ("benchflow-openai-gpt-5.4", 128000),
+        ("runtime-openai-gpt-5.4", 128000),
         ("claude-sonnet-4-6", 128000),
         ("claude-opus-4-6", 128000),
         ("claude-opus-4-7", 128000),
@@ -26,6 +27,7 @@ import pytest
         ("anthropic/claude-sonnet-5-2", 128000),
         ("azure-foundry-anthropic/claude-sonnet-4-6", 128000),
         ("benchflow-anthropic-claude-opus-5", 128000),
+        ("runtime-anthropic-claude-opus-5", 128000),
         ("claude-sonnet-4-60", None),
         ("claude-sonnet-5-beta", None),
         ("claude-opus-5-1-2", None),
@@ -176,6 +178,29 @@ def test_generic_provider_env_configures_stripped_model(
     config = json.loads((tmp_path / ".openclaw" / "openclaw.json").read_text())
     models = config["models"]["providers"]["custom"]["models"]
     assert models[0]["id"] == "deepseek-v4-flash"
+
+
+def test_runtime_names_configure_the_provider_before_old_names(
+    shim, tmp_path, monkeypatch
+) -> None:
+    """BenchFlow hands the agent RUNTIME_PROVIDER_*; older releases handed it
+    BENCHFLOW_PROVIDER_*, which the shim still reads when the new name is unset."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("RUNTIME_PROVIDER_BASE_URL", "https://proxy.test/v1")
+    monkeypatch.setenv("BENCHFLOW_PROVIDER_BASE_URL", "https://old.test/v1")
+    monkeypatch.setenv("BENCHFLOW_PROVIDER_API_KEY", "old-key")
+    monkeypatch.setenv("RUNTIME_PROVIDER_PROTOCOL", "anthropic-messages")
+    monkeypatch.setenv(
+        "RUNTIME_PROVIDER_MODELS", '[{"id":"runtime-model","name":"Runtime"}]'
+    )
+
+    assert shim._find_and_setup_provider("runtime-model") == "custom"
+    config = json.loads((tmp_path / ".openclaw" / "openclaw.json").read_text())
+    provider = config["models"]["providers"]["custom"]
+    assert provider["baseUrl"] == "https://proxy.test/v1"
+    assert provider["apiKey"] == "old-key"
+    assert provider["api"] == "anthropic-messages"
+    assert provider["models"][0]["id"] == "runtime-model"
 
 
 def _provider_config(name: str = "deepseek") -> SimpleNamespace:
@@ -591,3 +616,35 @@ def test_effort_config_drives_prompt_and_resets(shim, monkeypatch):
     assert commands[0][-2:] == ("--thinking", "low")
     assert commands[1][-2:] == ("--thinking", "off")
     assert all("--thinking" not in command for command in commands[2:])
+
+
+@pytest.mark.parametrize("prefix", ["RUNTIME_", "BENCHFLOW_"])
+def test_set_model_reads_the_provider_and_params_under_either_name(
+    shim, monkeypatch, prefix: str
+) -> None:
+    """BenchFlow hands the agent RUNTIME_*; older releases handed it BENCHFLOW_*."""
+    monkeypatch.setattr(shim, "setup_openai_auth", lambda: None)
+    monkeypatch.setattr(shim, "setup_gcloud_adc", lambda: None)
+    monkeypatch.setenv(f"{prefix}PROVIDER_NAME", "google-vertex")
+    monkeypatch.setenv(f"{prefix}MODEL_MAX_TOKENS", "4096")
+    monkeypatch.setenv(f"{prefix}MODEL_TEMPERATURE", "0.5")
+    monkeypatch.setenv(f"{prefix}MODEL_TOP_P", "0.9")
+    calls = []
+    monkeypatch.setattr(
+        shim.subprocess, "run", lambda args, **kwargs: calls.append(args)
+    )
+    inbox = iter(
+        [{"id": 1, "method": "session/set_model", "params": {"modelId": "gemini-3"}}]
+    )
+    monkeypatch.setattr(shim, "recv", lambda: next(inbox))
+    monkeypatch.setattr(shim, "send", lambda _: None)
+
+    with pytest.raises(StopIteration):
+        shim.main()
+
+    assert [call[-2:] for call in calls] == [
+        ["agents.defaults.model", "google-vertex/gemini-3"],
+        ["agents.defaults.params.maxTokens", "4096"],
+        ["agents.defaults.params.temperature", "0.5"],
+        ["agents.defaults.params.topP", "0.9"],
+    ]

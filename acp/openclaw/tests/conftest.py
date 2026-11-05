@@ -17,16 +17,20 @@ def clean_shim_env(monkeypatch):
         "OPENAI_API_KEY",
         "GOOGLE_APPLICATION_CREDENTIALS",
         "GOOGLE_APPLICATION_CREDENTIALS_JSON",
-        "BENCHFLOW_PROVIDER_NAME",
-        "BENCHFLOW_PROVIDER_BASE_URL",
-        "BENCHFLOW_PROVIDER_API_KEY",
-        "BENCHFLOW_PROVIDER_PROTOCOL",
-        "BENCHFLOW_PROVIDER_MODELS",
-        "BENCHFLOW_MODEL_TEMPERATURE",
-        "BENCHFLOW_MODEL_TOP_P",
-        "BENCHFLOW_MODEL_MAX_TOKENS",
     ):
         monkeypatch.delenv(name, raising=False)
+    for name in (
+        "PROVIDER_NAME",
+        "PROVIDER_BASE_URL",
+        "PROVIDER_API_KEY",
+        "PROVIDER_PROTOCOL",
+        "PROVIDER_MODELS",
+        "MODEL_TEMPERATURE",
+        "MODEL_TOP_P",
+        "MODEL_MAX_TOKENS",
+    ):
+        monkeypatch.delenv(f"RUNTIME_{name}", raising=False)
+        monkeypatch.delenv(f"BENCHFLOW_{name}", raising=False)
 
 
 @pytest.fixture

@@ -68,18 +68,31 @@ def _effort_options(effort: str) -> list[dict]:
     ]
 
 
+def _env(name: str, default: str = "") -> str:
+    """BenchFlow's variable ``name`` (``PROVIDER_BASE_URL``, ``MODEL_TOP_P``...).
+
+    BenchFlow hands the agent ``RUNTIME_<name>``; older releases named it
+    ``BENCHFLOW_<name>``. The new name wins.
+    """
+    for prefix in ("RUNTIME_", "BENCHFLOW_"):
+        value = os.environ.get(prefix + name)
+        if value is not None:
+            return value
+    return default
+
+
 _PARAM_MAP = {
-    "BENCHFLOW_MODEL_TEMPERATURE": "agents.defaults.params.temperature",
-    "BENCHFLOW_MODEL_TOP_P": "agents.defaults.params.topP",
-    "BENCHFLOW_MODEL_MAX_TOKENS": "agents.defaults.params.maxTokens",
+    "MODEL_TEMPERATURE": "agents.defaults.params.temperature",
+    "MODEL_TOP_P": "agents.defaults.params.topP",
+    "MODEL_MAX_TOKENS": "agents.defaults.params.maxTokens",
 }
 
 
 _TOKEN_CAP_MODEL = (
     r"(?:(?:(?:openai|us-openai|azure-foundry-openai)/|"
-    r"benchflow-(?:(?:openai|us-openai|azure-foundry-openai)-)?)?gpt-5\.4|"
+    r"(?:runtime|benchflow)-(?:(?:openai|us-openai|azure-foundry-openai)-)?)?gpt-5\.4|"
     r"(?:(?:anthropic|anthropic-vertex|azure-foundry-anthropic)/|"
-    r"benchflow-(?:(?:anthropic|anthropic-vertex|azure-foundry-anthropic)-)?)?"
+    r"(?:runtime|benchflow)-(?:(?:anthropic|anthropic-vertex|azure-foundry-anthropic)-)?)?"
     r"claude-(?:sonnet-4-6|opus-4-[6-8]|(?:sonnet|opus)-5(?:-\d+)?))"
 )
 
@@ -376,7 +389,7 @@ def _setup_provider_from_config(
 
     Raises ``KeyError`` if a required ``url_params`` env var is missing, so the
     prefix-based caller can preserve its existing "fall through to the
-    BENCHFLOW_PROVIDER_* env-var path" behavior on that specific failure.
+    RUNTIME_PROVIDER_* env-var path" behavior on that specific failure.
     """
     from benchflow.agents.providers import resolve_base_url
 
@@ -449,7 +462,8 @@ def _find_and_setup_provider(model: str) -> str | None:
 
     Resolution order:
     1. If benchflow is importable, try find_provider(model) for prefix-based match.
-    2. Fall back to BENCHFLOW_PROVIDER_* env vars injected by the SDK.
+    2. Fall back to the RUNTIME_PROVIDER_* env vars injected by the SDK
+       (BENCHFLOW_PROVIDER_* from older releases).
        This handles stripped model names (no prefix) where the SDK already
        resolved the provider and passed config via env vars.
     """
@@ -467,14 +481,14 @@ def _find_and_setup_provider(model: str) -> str | None:
     except ImportError:
         logger.debug("benchflow.agents.providers not available, using env var fallback")
 
-    # 2. Fall back to BENCHFLOW_PROVIDER_* env vars set by the SDK.
+    # 2. Fall back to RUNTIME_PROVIDER_* env vars set by the SDK.
     #    This is the primary path for stripped model names (e.g. "claude-sonnet-4-6"
     #    from "anthropic-vertex/claude-sonnet-4-6") where the SDK already resolved
     #    the provider config.
-    base_url = os.environ.get("BENCHFLOW_PROVIDER_BASE_URL")
-    api_key = os.environ.get("BENCHFLOW_PROVIDER_API_KEY")
-    api_protocol = os.environ.get("BENCHFLOW_PROVIDER_PROTOCOL", "openai-completions")
-    models_json = os.environ.get("BENCHFLOW_PROVIDER_MODELS", "[]")
+    base_url = _env("PROVIDER_BASE_URL")
+    api_key = _env("PROVIDER_API_KEY")
+    api_protocol = _env("PROVIDER_PROTOCOL", "openai-completions")
+    models_json = _env("PROVIDER_MODELS", "[]")
     # If no explicit API key, try ADC (for Vertex AI providers)
     if base_url and not api_key:
         try:
@@ -495,13 +509,13 @@ def _find_and_setup_provider(model: str) -> str | None:
 def _resolve_bare_model_prefix(model: str) -> str:
     """Resolve (and, where possible, configure) the provider for a BARE model id.
 
-    Used by the ``session/set_model`` branch where ``BENCHFLOW_PROVIDER_NAME``
+    Used by the ``session/set_model`` branch where ``RUNTIME_PROVIDER_NAME``
     is absent. Each step falls through on ``None``:
 
     1. ``_setup_bare_custom_provider`` — the registry claims the bare id and
        its provider-specific config env vars resolve; the provider is written
        into openclaw.json.
-    2. ``_find_and_setup_provider`` — generic ``BENCHFLOW_PROVIDER_*`` env
+    2. ``_find_and_setup_provider`` — generic ``RUNTIME_PROVIDER_*`` env
        fallback: a harness may inject endpoint config without the provider
        name. Explicit endpoint config must win over a prefix guess for a
        provider openclaw was never configured with (codex P2 on PR #670).
@@ -656,12 +670,12 @@ def main():
             try:
                 if model:
                     # The SDK strips provider prefixes before set_model and passes
-                    # the original provider name via BENCHFLOW_PROVIDER_NAME env var.
+                    # the original provider name via RUNTIME_PROVIDER_NAME env var.
                     #
                     # Openclaw natively supports google-vertex/ and anthropic/ prefixes
                     # (via the google plugin enabled at startup). Custom providers like
                     # zai/ and other custom providers need explicit registration via openclaw.json.
-                    provider_name = os.environ.get("BENCHFLOW_PROVIDER_NAME", "")
+                    provider_name = _env("PROVIDER_NAME")
 
                     # Native Vertex providers — openclaw handles these via google plugin
                     if provider_name in ("google-vertex", "anthropic-vertex"):
@@ -674,7 +688,7 @@ def main():
                         if _provider_name and "/" not in model:
                             model = f"{_provider_name}/{model}"
                     # No provider env var — resolve the bare id: registry-specific
-                    # setup, then the generic BENCHFLOW_PROVIDER_* env fallback,
+                    # setup, then the generic RUNTIME_PROVIDER_* env fallback,
                     # then prefix heuristics (see _resolve_bare_model_prefix).
                     elif "/" not in model:
                         model = f"{_resolve_bare_model_prefix(model)}/{model}"
@@ -693,7 +707,7 @@ def main():
                     )
 
                 max_tokens = _max_tokens_value(
-                    requested_model, os.environ.get("BENCHFLOW_MODEL_MAX_TOKENS")
+                    requested_model, _env("MODEL_MAX_TOKENS")
                 )
                 if max_tokens:
                     subprocess.run(
@@ -701,7 +715,7 @@ def main():
                             _OPENCLAW_BIN,
                             "config",
                             "set",
-                            _PARAM_MAP["BENCHFLOW_MODEL_MAX_TOKENS"],
+                            _PARAM_MAP["MODEL_MAX_TOKENS"],
                             max_tokens,
                         ],
                         capture_output=True,
@@ -709,11 +723,8 @@ def main():
                         timeout=10,
                     )
                 # Apply model generation parameters from env vars
-                for env_key in (
-                    "BENCHFLOW_MODEL_TEMPERATURE",
-                    "BENCHFLOW_MODEL_TOP_P",
-                ):
-                    val = os.environ.get(env_key)
+                for env_key in ("MODEL_TEMPERATURE", "MODEL_TOP_P"):
+                    val = _env(env_key)
                     if val:
                         subprocess.run(
                             [
