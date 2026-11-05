@@ -30,9 +30,16 @@ from benchflow.agents.registry import (
     register_agent,
 )
 
+try:
+    from benchflow._runtime_tree import RUNTIME_ROOT
+except ImportError:  # a BenchFlow without the module kept its tree here
+    RUNTIME_ROOT = "/opt/benchflow"
+
 # Isolated venv for the Python-based mini-swe-agent harness — kept out of the
 # task's own Python so benchmark images can pin whatever interpreter they need.
-_MINI_SWE_VENV = "/opt/benchflow/mini-swe-venv"
+# It lives in BenchFlow's runtime tree (/opt/runtime; /opt/benchflow in older
+# releases), beside the uv and managed CPython it is built from.
+_MINI_SWE_VENV = f"{RUNTIME_ROOT}/mini-swe-venv"
 _SHIM_SOURCE = (Path(__file__).parent / "acp_shim.py").read_text()
 _SHIM_PATH = f"{_BENCHFLOW_BIN_PREFIX}/mini-swe-acp-shim"
 
@@ -48,7 +55,7 @@ MINI_SWE_AGENT_VERSION = "2.4.6"
 LITELLM_VERSION = "1.105.1"
 PIP_VERSION = "26.2.1"
 _REQUIREMENTS_SOURCE = (Path(__file__).parent / "requirements.txt").read_text()
-_REQUIREMENTS_PATH = "/opt/benchflow/mini-swe-requirements.txt"
+_REQUIREMENTS_PATH = f"{RUNTIME_ROOT}/mini-swe-requirements.txt"
 
 # Run once after the install: the call mini-swe makes on every step (a
 # completion with a tool), answered by LiteLLM's mock_response so it needs no
@@ -80,7 +87,7 @@ def _install_cmd() -> str:
         # installation into the task image (even when it lacks curl/Python).
         f"{uv_install_command(install_packages=False)} && "
         f"{{ {managed_python_exports()}; }} && "
-        f"{private_tmpdir_exports('/opt/benchflow/mini-swe-tmp')} && "
+        f"{private_tmpdir_exports(f'{RUNTIME_ROOT}/mini-swe-tmp')} && "
         f"{{ {managed_python_install_command(UV_BIN)}; }} && "
         f"mkdir -p {_MINI_SWE_VENV} {_BENCHFLOW_BIN_PREFIX} && "
         f"{root_only_tree_check(_MINI_SWE_VENV, 'mini-swe venv')} && "
@@ -132,10 +139,11 @@ def register() -> None:
         install_cmd=_install_cmd(),
         launch_cmd=_launch_cmd(),
         protocol="acp",
-        # Inferred from --model at runtime; the shim reads BENCHFLOW_PROVIDER_*.
+        # Inferred from --model at runtime; the shim reads RUNTIME_PROVIDER_*
+        # (BENCHFLOW_PROVIDER_* from older releases).
         requires_env=[],
         # Empty lets the provider determine routing for multi-endpoint providers;
-        # the shim reconstructs the litellm prefix from BENCHFLOW_PROVIDER_PROTOCOL.
+        # the shim reconstructs the litellm prefix from the provider protocol.
         api_protocol="",
         description=(
             "mini-swe-agent via ACP shim — minimal single-bash-tool harness "

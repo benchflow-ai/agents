@@ -9,6 +9,7 @@ install. Needs ``benchflow`` (register.py imports its registry helpers).
 import base64
 import importlib
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,13 +42,11 @@ def test_every_requirement_is_an_exact_pin():
 def test_install_writes_the_pinned_list_and_installs_only_it():
     cmd = register._install_cmd()
     encoded = re.search(
-        r"echo (\S+) \| base64 -d > /opt/benchflow/mini-swe-requirements\.txt", cmd
+        rf"echo (\S+) \| base64 -d > {re.escape(register._REQUIREMENTS_PATH)}", cmd
     )
     assert encoded, cmd
     assert base64.b64decode(encoded.group(1)).decode() == _REQUIREMENTS.read_text()
-    assert (
-        "pip --isolated install -q -r /opt/benchflow/mini-swe-requirements.txt" in cmd
-    )
+    assert f"pip --isolated install -q -r {register._REQUIREMENTS_PATH}" in cmd
     assert (
         f"pip install -q --python {register._MINI_SWE_VENV}/bin/python pip=={register.PIP_VERSION}"
         in cmd
@@ -101,6 +100,37 @@ def test_private_runtime_never_installs_task_system_packages():
         assert forbidden not in cmd
     assert "--no-bin --reinstall 3.12.15" in cmd
     assert "UV_PYTHON_PREFERENCE=only-managed" in cmd
+    root = register.RUNTIME_ROOT
     assert register._launch_cmd().endswith(
-        "/opt/benchflow/mini-swe-venv/bin/python /opt/benchflow/bin/mini-swe-acp-shim"
+        f"{root}/mini-swe-venv/bin/python {root}/bin/mini-swe-acp-shim"
     )
+
+
+def test_installs_under_the_runtime_root_benchflow_gives():
+    """The venv, its requirements and uv's temp folder sit in BenchFlow's
+    runtime tree, wherever this BenchFlow keeps it. BenchFlow moved the tree
+    from /opt/benchflow to /opt/runtime and stopped making /opt/benchflow, so
+    a venv left there sat under a folder the private temp folder's umask 077
+    made: one only root could enter, and the agent's user got Permission
+    denied running it."""
+    from benchflow._runtime_tree import RUNTIME_ROOT
+
+    assert register.RUNTIME_ROOT == RUNTIME_ROOT
+    cmd = register._install_cmd()
+    for name in ("mini-swe-venv", "mini-swe-requirements.txt", "mini-swe-tmp"):
+        assert f"{RUNTIME_ROOT}/{name}" in cmd
+    if RUNTIME_ROOT != "/opt/benchflow":
+        assert "/opt/benchflow" not in cmd + register._launch_cmd()
+
+
+def test_a_benchflow_without_the_runtime_tree_keeps_the_old_root(monkeypatch):
+    """Without ``benchflow._runtime_tree`` the install keeps /opt/benchflow."""
+    monkeypatch.setitem(sys.modules, "benchflow._runtime_tree", None)
+    try:
+        old = importlib.reload(register)
+        assert old.RUNTIME_ROOT == "/opt/benchflow"
+        assert old._MINI_SWE_VENV == "/opt/benchflow/mini-swe-venv"
+        assert old._REQUIREMENTS_PATH == "/opt/benchflow/mini-swe-requirements.txt"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(register)

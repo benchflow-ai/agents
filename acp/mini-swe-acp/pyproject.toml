@@ -1,6 +1,6 @@
 [project]
 name = "mini-swe-acp"
-version = "0.1.1"
+version = "0.1.2"
 description = "mini-swe-agent as a BenchFlow agent — ACP shim + registration"
 readme = "README.md"
 license = { text = "Apache-2.0" }

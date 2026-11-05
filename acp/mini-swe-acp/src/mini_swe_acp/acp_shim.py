@@ -52,6 +52,19 @@ _OUT = sys.stdout
 # ── Provider routing policy (pure; unit-tested) ────────────────────────────────
 
 
+def _provider_env(name: str) -> str | None:
+    """BenchFlow's provider variable ``name`` (``MODEL``, ``BASE_URL``, ...).
+
+    BenchFlow hands the agent ``RUNTIME_PROVIDER_<name>``; older releases
+    named it ``BENCHFLOW_PROVIDER_<name>``. The new name wins.
+    """
+    for prefix in ("RUNTIME_PROVIDER_", "BENCHFLOW_PROVIDER_"):
+        value = os.environ.get(prefix + name)
+        if value is not None:
+            return value
+    return None
+
+
 def _is_anthropic_model(model: str) -> bool:
     m = model.lower()
     return "claude" in m or "anthropic" in m
@@ -62,7 +75,7 @@ def _litellm_prefix(protocol: str, model: str) -> str:
 
     The SDK strips the provider prefix before handing the model to the agent, so
     litellm can't infer the dialect from a bare name — we reconstruct it from the
-    resolved ``BENCHFLOW_PROVIDER_PROTOCOL``. mini-swe drives ``litellm.completion``,
+    resolved ``RUNTIME_PROVIDER_PROTOCOL``. mini-swe drives ``litellm.completion``,
     which speaks chat-completions and anthropic-messages but NOT the OpenAI
     Responses API; ``openai-responses`` only ever comes from aws-bedrock, whose
     proxy also exposes an anthropic-messages surface, so Anthropic models route
@@ -266,13 +279,13 @@ def _build_model(model_cfg: dict, model_override: str):
 
     bare = (
         model_override
-        or os.environ.get("BENCHFLOW_PROVIDER_MODEL")
+        or _provider_env("MODEL")
         or os.environ.get("MSWEA_MODEL_NAME")
         or ""
     )
-    protocol = os.environ.get("BENCHFLOW_PROVIDER_PROTOCOL", "")
-    base_url = os.environ.get("BENCHFLOW_PROVIDER_BASE_URL")
-    api_key = os.environ.get("BENCHFLOW_PROVIDER_API_KEY")
+    protocol = _provider_env("PROTOCOL") or ""
+    base_url = _provider_env("BASE_URL")
+    api_key = _provider_env("API_KEY")
 
     model_name = bare
     if "/" not in bare:
