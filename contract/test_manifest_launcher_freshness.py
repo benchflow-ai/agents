@@ -44,10 +44,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MANIFEST = _REPO_ROOT / "acp" / "pi-acp" / "manifest.toml"
 
 # install_cmd hand-embeds the launcher as:
-#   echo <BLOB> | base64 -d > /opt/benchflow/bin/pi-acp-launcher
+#   echo <BLOB> | base64 -d > /opt/runtime/bin/pi-acp-launcher
 _BLOB_RE = re.compile(
     r"echo\s+([A-Za-z0-9+/=]+)\s*\|\s*base64\s+-d\s*>\s*"
-    r"/opt/benchflow/bin/pi-acp-launcher"
+    r"/opt/runtime/bin/pi-acp-launcher"
 )
 
 
